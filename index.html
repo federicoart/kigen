@@ -1036,37 +1036,43 @@ function catRow(c){const n=Object.values(S.products).filter(p=>p.category===c.id
 
 /* ---------- lot photo reading ---------- */
 function prevLotsFor(){const a=S.add;if(!a)return[];const pid=a.pid||findProductId(a.typed||"");
-  const own=pid?lotsOf(pid).map(([,l])=>l.lot):[];return own.length?own:Object.values(S.lots).slice(-30).map(l=>l.lot);}
+  return pid?lotsOf(pid).map(([,l])=>l.lot).filter(Boolean):[];}
 async function onLotPhoto(files){
   if(!files||!files.length)return;
   const imgs=Array.from(files).slice(0,IMGMAX);
   $("#thumbs").innerHTML=imgs.map(f=>`<img alt="" src="${URL.createObjectURL(f)}">`).join("");
-  const st=$("#ocrSt");st.className="ocr-status";st.innerHTML=`<span class="spin"></span><span id="ocrTxt">Leggo l’etichetta…</span>`;
+  const st=$("#ocrSt");st.className="ocr-status";
+  st.innerHTML=`<span class="spin"></span><span id="ocrTxt" style="flex:1">Leggo l’etichetta…</span><button type="button" class="btn ghost" style="min-height:0;padding:2px 6px;font-size:12.5px" data-action="ocr-stop">Basta così</button>`;
   const pick=$("#ocrPick");if(pick)pick.innerHTML="";
-  const prog=label=>p=>{const t=$("#ocrTxt");if(t)t.textContent=`${label}… ${Math.round(p*100)}%`;};
-  const alive=()=>$("#ocrSt")&&S.sheet?.type==="add";
+  const token={};S.ocrRun=token;
+  const alive=()=>$("#ocrSt")&&S.sheet?.type==="add"&&S.ocrRun===token;
+  const prog=label=>p=>{const t=$("#ocrTxt");if(t&&S.ocrRun===token)t.textContent=`${label}… ${Math.round(p*100)}%`;};
   try{
     const prev=prevLotsFor();
-    let text="",words=[];
-    const run=async(label,mode,rot)=>{let t="",w=[];for(let i=0;i<imgs.length;i++){const r=await ocr(imgs[i],prog(label+(imgs.length>1?` (${i+1}/${imgs.length})`:"")),mode,rot);t+="\n"+r.text;w=w.concat(r.words);}return{t,w};};
-    let r0=await run("Leggo l’etichetta");if(!alive())return;
-    text=r0.t;words=r0.w;let r=parseLabel(text,prev);
-    if(!r.lot||!r.expiry){
-      const r1=await run("Stampa a puntini? Riprovo","dots");if(!alive())return;
-      const p1=parseLabel(r1.t,prev);text+="\n"+r1.t;words=words.concat(r1.w);
-      r=mergeParse(r,p1);
-    }
-    if(!r.expiry){
-      for(const rot of [90,270]){
-        const rr=await run("Provo a girare la foto",null,rot);if(!alive())return;
-        const pr=parseLabel(rr.t,prev);
-        if(pr.expiry){text+="\n"+rr.t;words=words.concat(rr.w);r=mergeParse(r,pr);break;}
+    let text="",words=[],r=parseLabel("",prev);
+    const TILES=[];for(let ry=0;ry<3;ry++)for(let cx=0;cx<2;cx++){const tw=.5*1.35,th=1/3*1.6;const x0=Math.max(0,cx*.5-tw*.15),y0=Math.max(0,ry/3-th*.2);TILES.push([x0,y0,Math.min(1,x0+tw),Math.min(1,y0+th)]);}
+    const plan=[["Leggo l’etichetta","std"],["Guardo meglio","adapt6"],["Guardo meglio","adapt"],["Stampa a puntini?","dots"],
+      ...TILES.map((t,i)=>[`Cerco nei dettagli ${i+1}/${TILES.length}`,"tile",0,t]),
+      ["Provo a girare la foto","adapt",90],["Provo a girare la foto","adapt",270]];
+    const done=()=>r.lot&&r.expiry&&r.strong;
+    for(const [label,mode,rot,crop] of plan){
+      if(!alive()||S.ocrStop===token)break;
+      if(done())break;
+      if(rot&&r.expiry)break;
+      for(let i=0;i<imgs.length;i++){
+        const res=await ocr(imgs[i],prog(label+(imgs.length>1?` (${i+1}/${imgs.length})`:"")),mode,rot,crop);
+        if(!alive())return;
+        text+="\n\f\n"+res.text;words=words.concat(res.words);
+        try{(window.__kigenPasses=window.__kigenPasses||[]).push({label,mode,rot:rot||0,crop:crop||null,text:res.text});}catch(e){}
       }
+      r=parseLabel(text,prev);
+      S.ocr={r,words};applyLotOcr(r,words,true);
     }
-    S.ocr={r,words};
-    applyLotOcr(r,words);
+    if(!alive())return;
+    S.ocr={r,words};try{window.__kigenLastOcr=text;}catch(e){}
+    applyLotOcr(r,words,false);
   }catch(e){
-    if(!$("#ocrSt"))return;
+    if(!$("#ocrSt")||S.ocrRun!==token)return;
     st.className="ocr-status err";st.innerHTML=`<span class="ms">wifi_off</span><span>Lettura non riuscita. La prima volta serve internet per scaricare il lettore, poi funziona anche offline.</span>`;
   }
 }
@@ -1085,7 +1091,7 @@ function fillField(id,val,conf){
   if(id==="fExp")setDate(id,val);else el.value=val;
   el.dataset.auto="1";el.dataset.touched="";el.classList.remove("filled","check","bad");el.classList.add(conf<70?"check":"filled");return true;
 }
-function applyLotOcr(r,words){
+function applyLotOcr(r,words,partial){
   const st=$("#ocrSt");if(!st)return;
   const got=[],warn=[];
   const lotEl=$("#fLot"),expEl=$("#fExp");
@@ -1096,6 +1102,7 @@ function applyLotOcr(r,words){
   else if(got.length)msg+=" Controlla e salva.";
   if(r.monthOnly&&r.expiry)msg+=" C’è solo mese e anno: impostato l’ultimo giorno.";
   if(!got.length)msg+=" Tocca qui sotto il valore giusto, oppure riprova più vicino e con più luce.";
+  if(partial){renderOcrPick();return;}
   st.className="ocr-status "+(got.length&&!warn.length?"ok":"err");
   st.innerHTML=`<span class="ms">${got.length?(warn.length?"warning":"check_circle"):"search_off"}</span><span>${esc(msg)}</span>`;
   renderOcrPick();
@@ -1124,29 +1131,56 @@ function loadTess(){
   return tessP;
 }
 function loadImg(url){return new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=rej;i.src=url;});}
-async function prepImg(blob,mode,rot){
+function boxMean(src,W,H,r){
+  const n=W*H,t=new Float32Array(n),o=new Float32Array(n),k=2*r+1;
+  for(let y=0;y<H;y++){const b=y*W;let s=0;for(let i=-r;i<=r;i++)s+=src[b+Math.min(W-1,Math.max(0,i))];
+    for(let x=0;x<W;x++){t[b+x]=s/k;s+=src[b+Math.min(W-1,x+r+1)]-src[b+Math.max(0,x-r)];}}
+  for(let x=0;x<W;x++){let s=0;for(let i=-r;i<=r;i++)s+=t[Math.min(H-1,Math.max(0,i))*W+x];
+    for(let y=0;y<H;y++){o[y*W+x]=s/k;s+=t[Math.min(H-1,y+r+1)*W+x]-t[Math.max(0,y-r)*W+x];}}
+  return o;
+}
+function autoContrast(g){
+  const hist=new Uint32Array(256);for(let j=0;j<g.length;j++)hist[g[j]|0]++;
+  const cut=g.length*0.01;let lo=0,hi=255,a=0;while(lo<255&&(a+=hist[lo])<cut)lo++;a=0;while(hi>0&&(a+=hist[hi])<cut)hi--;
+  if(hi-lo<10)return;const f=255/(hi-lo);for(let j=0;j<g.length;j++){const v=(g[j]-lo)*f;g[j]=v<0?0:v>255?255:v;}
+}
+function sauvola(g,W,H,r,k){
+  const m=boxMean(g,W,H,r),g2=new Float32Array(g.length);for(let j=0;j<g.length;j++)g2[j]=g[j]*g[j];
+  const m2=boxMean(g2,W,H,r);
+  for(let j=0;j<g.length;j++){const s=Math.sqrt(Math.max(m2[j]-m[j]*m[j],0));g[j]=g[j]>m[j]*(1+k*(s/128-1))?255:0;}
+}
+function otsu(g){
+  const hist=new Array(256).fill(0),n=g.length;for(let j=0;j<n;j++)hist[g[j]|0]++;
+  let sum=0;for(let i=0;i<256;i++)sum+=i*hist[i];let wb=0,sb=0,best=0,th=128;
+  for(let i=0;i<256;i++){wb+=hist[i];if(!wb)continue;const wf=n-wb;if(!wf)break;sb+=i*hist[i];const mb=sb/wb,mf=(sum-sb)/wf,v=wb*wf*(mb-mf)*(mb-mf);if(v>best){best=v;th=i;}}
+  for(let j=0;j<n;j++)g[j]=g[j]<th?0:255;
+}
+/* mode: std (light contrast), adapt (upscale + adaptive threshold), tile (crop + strong upscale + adaptive), dots (merge ink-jet dots) */
+async function prepImg(blob,mode,rot,crop){
   const url=URL.createObjectURL(blob);
   try{
     const img=await loadImg(url);
-    const sc=Math.min(2.5,2200/Math.max(img.naturalWidth,img.naturalHeight));
-    const w0=Math.round(img.naturalWidth*sc),h0=Math.round(img.naturalHeight*sc),sw=rot===90||rot===270;
+    const iw=img.naturalWidth,ih=img.naturalHeight;
+    const [fx0,fy0,fx1,fy1]=crop||[0,0,1,1];
+    const sx=Math.round(iw*fx0),sy=Math.round(ih*fy0),cw=Math.max(8,Math.round(iw*(fx1-fx0))),ch=Math.max(8,Math.round(ih*(fy1-fy0)));
+    let sc;
+    if(mode==="tile")sc=Math.min(4,1800/cw);
+    else if(mode==="adapt"||mode==="dots")sc=Math.min(4,Math.max(1,1400/Math.min(cw,ch)),3200/Math.max(cw,ch));
+    else sc=Math.min(2.5,2200/Math.max(cw,ch));
+    sc=Math.min(sc,Math.sqrt(5e6/(cw*ch)));
+    const w0=Math.max(8,Math.round(cw*sc)),h0=Math.max(8,Math.round(ch*sc)),sw=rot===90||rot===270;
     const W=sw?h0:w0,H=sw?w0:h0;
     const c=document.createElement("canvas");c.width=W;c.height=H;
-    const x=c.getContext("2d");
-    if(rot){x.translate(W/2,H/2);x.rotate(rot*Math.PI/180);x.drawImage(img,-w0/2,-h0/2,w0,h0);x.setTransform(1,0,0,1,0,0);}else x.drawImage(img,0,0,W,H);
+    const x=c.getContext("2d");x.imageSmoothingQuality="high";
+    if(rot){x.translate(W/2,H/2);x.rotate(rot*Math.PI/180);x.drawImage(img,sx,sy,cw,ch,-w0/2,-h0/2,w0,h0);x.setTransform(1,0,0,1,0,0);}
+    else x.drawImage(img,sx,sy,cw,ch,0,0,W,H);
     const d=x.getImageData(0,0,W,H),p=d.data,n=W*H,g=new Float32Array(n);
     for(let i=0,j=0;j<n;i+=4,j++)g[j]=.299*p[i]+.587*p[i+1]+.114*p[i+2];
-    if(mode==="dots"){
-      // merge ink-jet dots: separable box blur, then Otsu threshold
-      const r=Math.max(2,Math.round(Math.max(W,H)/400)),t=new Float32Array(n),k=2*r+1;
-      for(let y=0;y<H;y++){let s=0;const o=y*W;for(let i=-r;i<=r;i++)s+=g[o+Math.min(W-1,Math.max(0,i))];for(let xx=0;xx<W;xx++){t[o+xx]=s/k;s+=g[o+Math.min(W-1,xx+r+1)]-g[o+Math.max(0,xx-r)];}}
-      for(let xx=0;xx<W;xx++){let s=0;for(let i=-r;i<=r;i++)s+=t[Math.min(H-1,Math.max(0,i))*W+xx];for(let y=0;y<H;y++){g[y*W+xx]=s/k;s+=t[Math.min(H-1,y+r+1)*W+xx]-t[Math.max(0,y-r)*W+xx];}}
-      const hist=new Array(256).fill(0);for(let j=0;j<n;j++)hist[g[j]|0]++;
-      let sum=0;for(let i=0;i<256;i++)sum+=i*hist[i];let wb=0,sb=0,best=0,th=128;
-      for(let i=0;i<256;i++){wb+=hist[i];if(!wb)continue;const wf=n-wb;if(!wf)break;sb+=i*hist[i];const mb=sb/wb,mf=(sum-sb)/wf,v=wb*wf*(mb-mf)*(mb-mf);if(v>best){best=v;th=i;}}
-      for(let j=0;j<n;j++)g[j]=g[j]<th?0:255;
-    }else{
-      for(let j=0;j<n;j++){let v=(g[j]-128)*1.6+128;g[j]=v<0?0:v>255?255:v;}
+    if(mode==="std"||!mode){for(let j=0;j<n;j++){let v=(g[j]-128)*1.6+128;g[j]=v<0?0:v>255?255:v;}}
+    else{
+      autoContrast(g);
+      if(mode==="dots"){const b=boxMean(g,W,H,Math.max(2,Math.round(sc*1.3)));g.set(b);sauvola(g,W,H,Math.max(7,Math.round(Math.min(W,H)/24)),0.15);}
+      else sauvola(g,W,H,Math.max(7,Math.round(Math.min(W,H)/(mode==="tile"?10:24))),0.2);
     }
     for(let i=0,j=0;j<n;i+=4,j++)p[i]=p[i+1]=p[i+2]=g[j];
     x.putImageData(d,0,0);return c;
@@ -1154,18 +1188,87 @@ async function prepImg(blob,mode,rot){
 }
 function withTimeout(pr,ms){let t;return Promise.race([pr,new Promise((_,rej)=>{t=setTimeout(()=>rej(new Error("timeout")),ms);})]).finally(()=>clearTimeout(t));}
 let tessFail=null;
-async function ocr(blob,onProg,mode,rot){
+let tessPsm="3";
+try{window.__kigenPrep=(b,m,r,c)=>prepImg(b,m,r,c).then(cv=>cv.toDataURL("image/png"));}catch(e){}
+async function tessSet(psm,wl){
+  const key=psm+"|"+(wl||"");if(key===tessPsm)return;
+  try{await tessWorker.setParameters({tessedit_pageseg_mode:psm,tessedit_char_whitelist:wl||""});tessPsm=key;}catch(e){}
+}
+async function ensureWorker(onProg){
   await withTimeout(loadTess(),30000);
   tessProg=onProg;
   if(!tessWorker){
-    tessFail=null;
+    tessFail=null;tessPsm="";
     const wp=Tesseract.createWorker(["ita","eng"],1,{logger:m=>{if(tessProg&&m.status==="recognizing text")tessProg(m.progress);},errorHandler:e=>{tessFail=e;}});
     try{tessWorker=await withTimeout(Promise.race([wp,new Promise((_,rej)=>{const iv=setInterval(()=>{if(tessFail){clearInterval(iv);rej(tessFail);}},300);setTimeout(()=>clearInterval(iv),95000);})]),90000);}
     catch(e){wp.then(w=>w.terminate()).catch(()=>{});tessWorker=null;throw e;}
   }
-  const c=await prepImg(blob,mode,rot);
-  try{const r=await withTimeout(tessWorker.recognize(c),120000);const d=(r&&r.data)||{};return{text:d.text||"",words:(d.words||[]).map(w=>({text:w.text,confidence:w.confidence}))};}
+}
+async function recog(c){
+  try{const r=await withTimeout(tessWorker.recognize(c),120000);return(r&&r.data)||{};}
   catch(e){try{await tessWorker.terminate();}catch(_){}tessWorker=null;throw e;}
+}
+/* re-read one uncertain word on its own: crop, enlarge, allow only code characters */
+async function refineWord(c,w){
+  const b=w.bbox,hh=b.y1-b.y0;if(hh<6)return null;
+  const px=Math.round(hh*0.8),py=Math.round(hh*0.35);
+  const x0=Math.max(0,b.x0-px),y0=Math.max(0,b.y0-py),x1=Math.min(c.width,b.x1+px),y1=Math.min(c.height,b.y1+py);
+  const s=Math.min(4,Math.max(1,90/hh));
+  const cc=document.createElement("canvas");cc.width=Math.max(8,Math.round((x1-x0)*s));cc.height=Math.max(8,Math.round((y1-y0)*s));
+  const cx=cc.getContext("2d");cx.fillStyle="#fff";cx.fillRect(0,0,cc.width,cc.height);cx.imageSmoothingQuality="high";cx.drawImage(c,x0,y0,x1-x0,y1-y0,0,0,cc.width,cc.height);
+  await tessSet("7","0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ./-:");
+  const d=await recog(cc);
+  return String(d.text||"").trim().replace(/\s+/g," ");
+}
+async function ocr(blob,onProg,mode,rot,crop){
+  await ensureWorker(onProg);
+  const adv=mode&&mode!=="std";
+  const psm=(mode==="adapt6"||mode==="tile")?"6":adv?"11":"3";
+  if(mode==="adapt6")mode="adapt";
+  await tessSet(psm,"");
+  const c=await prepImg(blob,mode||"std",rot,crop);
+  const d=await recog(c);
+  const words=(d.words||[]).map(w=>({text:w.text,confidence:w.confidence,bbox:w.bbox}));
+  let extra="";
+  if(adv){
+    const cand=words.filter(w=>/\d/.test(w.text)&&w.text.replace(/[^0-9]/g,"").length>=3&&w.confidence<92&&!findDates(normText(w.text)).length).sort((a,b)=>a.confidence-b.confidence).slice(0,8);
+    for(const w of cand){
+      let t=null;try{t=await refineWord(c,w);}catch(e){if(!tessWorker)throw e;}
+      if(!t)continue;
+      if(!findDates(normText(w.text)).length&&findDates(normText(t)).length){extra+="\n"+t;w.alt=t;}
+    }
+    await tessSet(psm,"");
+    extra+="\n"+pairWords(words).join("\n");
+  }
+  return{text:(d.text||"")+extra,words};
+}
+/* labels in columns: take the value to the right of, or under, "Lotto" / "entro" */
+function pairWords(ws){
+  const out=[];
+  for(const k of ws){
+    const t=String(k.text).toUpperCase().replace(/[^A-Z0-9]/g,"");
+    const isLot=/^(LOTT[OEA0]|LOTE|LOT|BATCH)$/.test(t),isExp=/^(ENTRO|SCAD|SCADENZA|EXP|BBE|TMC|AVANT|CONSUMARE|CONSUMARSI)$/.test(t);
+    if(!isLot&&!isExp||!k.bbox)continue;
+    const h=Math.max(4,k.bbox.y1-k.bbox.y0),kcy=(k.bbox.y0+k.bbox.y1)/2;
+    let best=null,bd=1e9;
+    for(const w of ws){
+      if(w===k||!w.bbox)continue;const v=w.alt||w.text;if(!/\d/.test(v))continue;
+      if(isLot&&v.replace(/\D/g,"").length<3)continue;
+      if(isExp&&!findDates(normText(v)).length&&!/^\d{6}$/.test(v.replace(/\D/g,"")))continue;
+      const cy=(w.bbox.y0+w.bbox.y1)/2;let dist=null;
+      if(isExp){
+        if(PRODKW.test(String(w.text).toUpperCase()))continue;
+        const wh=Math.max(4,w.bbox.y1-w.bbox.y0);
+        const leftProd=ws.some(o=>o!==w&&o.bbox&&Math.abs((o.bbox.y0+o.bbox.y1)/2-cy)<wh*0.7&&o.bbox.x1<=w.bbox.x0+wh&&w.bbox.x0-o.bbox.x1<wh*8&&PRODKW.test(String(o.text).toUpperCase()+" IL:"));
+        if(leftProd)continue;
+      }
+      if(Math.abs(cy-kcy)<h*0.7&&w.bbox.x0>=k.bbox.x1-h*0.5&&w.bbox.x0-k.bbox.x1<h*(isExp?60:8))dist=(w.bbox.x0-k.bbox.x1)*0.2;
+      else if(w.bbox.y0>=k.bbox.y1-h*0.3&&w.bbox.y0-k.bbox.y1<h*(isExp?4:3)&&w.bbox.x1>=k.bbox.x0-h&&w.bbox.x0<=k.bbox.x1+h*(isExp?18:4))dist=1000+(w.bbox.y0-k.bbox.y1)*2+Math.max(0,w.bbox.x0-k.bbox.x1)*0.4;
+      if(dist!==null&&dist<bd){bd=dist;best=w;}
+    }
+    if(best)out.push((isLot?"LOTTO ":"SCADENZA ")+(best.alt||best.text));
+  }
+  return out;
 }
 const MON={GEN:1,JAN:1,FEB:2,MAR:3,APR:4,MAG:5,MAY:5,GIU:6,JUN:6,LUG:7,JUL:7,AGO:8,AUG:8,SET:9,SEP:9,OTT:10,OCT:10,NOV:11,DIC:12,DEC:12};
 /* OCR confuses look-alike characters: fix them only inside date-like groups (digits separated by / . -) */
@@ -1178,10 +1281,13 @@ function normText(raw){
     return dig>=Math.ceil(core.length*0.6)?fixDigits(m).replace(/,/g,"."):m;});
   return t;
 }
-const EXPKW=/(SCAD|ENTRO|EXP|BEST|BBE|\bBB\b|TMC|T\.M\.C|USE BY|CONSUMAR|PREFERIB|VAL\.?|賞味|消費|保质|到期|유통|소비)/;
-const PRODKW=/(PROD|PKD|MFG|CONFEZ|PACK|DATA DI PRODUZIONE|製造|生产|제조)/;
+const EXPKW=/(SCAD|[AE]NTR[O0]|EMTRO|EXP|BEST|BBE|\bBB\b|TMC|T\.M\.C|USE BY|CONSUMAR|PREFERIB|AVANT|CONSOMMER|HALTBAR|MHD|CADUCIDAD|ANTES DE|賞味|消費|保质|到期|유통|소비)/;
+const PRODKW=/(PROD|PKD|MFG|CONFEZ|PACK|IMBALL|SURGELAT\w*\s*I?[L1I]?\s*[:.]|CONGELAT\w*\s*I?[L1I]?\s*[:.]|DATA DI PRODUZIONE|製造|生产|제조)/;
 function findDates(T){
-  const out=[];const push=(y,m,d,idx,len,mOnly,raw)=>{const y2=y<100;if(y<100)y+=2000;if(y<2000||y>2100||m<1||m>12)return;if(mOnly)d=new Date(y,m,0).getDate();const dt=new Date(y,m-1,d);if(dt.getMonth()!==m-1||dt.getDate()!==d)return;out.push({iso:iso(dt),idx,len,mOnly:!!mOnly,y2,raw});};
+  const out=[];const NY=new Date().getFullYear();
+  const push=(y,m,d,idx,len,mOnly,raw)=>{const y2=y<100;if(y<100)y+=2000;
+    if(y>NY+12){const s=String(y);for(const [a,b] of [["8","0"],["7","1"],["6","0"],["9","0"],["3","2"]]){let hit=false;for(let i=2;i<4&&!hit;i++)if(s[i]===a){const t=+(s.slice(0,i)+b+s.slice(i+1));if(t>=2000&&t<=NY+12){y=t;hit=true;}}if(hit)break;}}
+    if(y<2000||y>NY+12||m<1||m>12)return;if(mOnly)d=new Date(y,m,0).getDate();const dt=new Date(y,m-1,d);if(dt.getMonth()!==m-1||dt.getDate()!==d)return;out.push({iso:iso(dt),idx,len,mOnly:!!mOnly,y2,raw});};
   let m;const used=[];const free=(i,l)=>!used.some(([a,b])=>i<b&&i+l>a);
   const ymd=/(20\d{2})\s*[\/.\-年]\s*(\d{1,2})\s*[\/.\-月]\s*(\d{1,2})/g;
   while((m=ymd.exec(T))){push(+m[1],+m[2],+m[3],m.index,m[0].length,false,m[0]);used.push([m.index,m.index+m[0].length]);}
@@ -1193,10 +1299,16 @@ function findDates(T){
   while((m=mny.exec(T))){if(!free(m.index,m[0].length))continue;push(+m[2],MON[m[1]],1,m.index,m[0].length,true,m[0]);used.push([m.index,m.index+m[0].length]);}
   const my=/(?<![\d\/.\-])(\d{1,2})\s*[\/.\-]\s*(20\d{2})(?![\d\/.\-])/g;
   while((m=my.exec(T))){if(!free(m.index,m[0].length))continue;push(+m[2],+m[1],1,m.index,m[0].length,true,m[0]);used.push([m.index,m.index+m[0].length]);}
+  // day+month glued, year separate: "3112/2005"
+  const dmg=/(?<!\d)(\d{2})(\d{2})\s?[\/.\-]\s?(20\d{2})(?!\d)/g;
+  while((m=dmg.exec(T))){if(!free(m.index,m[0].length))continue;push(+m[3],+m[2],+m[1],m.index,m[0].length,false,m[0]);used.push([m.index,m.index+m[0].length]);}
   // compact ink-jet dates without separators, only right after an expiry keyword: "EXP 141226", "SCAD 14122026"
   const cmp=/(SCAD|EXP|BB|TMC|ENTRO)[^\d\n]{0,6}(\d{6}|\d{8})(?!\d)/g;
   while((m=cmp.exec(T))){const s=m[2],i=m.index+m[0].length-s.length;if(!free(i,s.length))continue;
     if(s.length===6)push(+s.slice(4),+s.slice(2,4),+s.slice(0,2),i,6,false,s);else push(+s.slice(4),+s.slice(2,4),+s.slice(0,2),i,8,false,s);used.push([i,i+s.length]);}
+  // standalone 6-digit token that is a valid recent/near date (weak, used only when nothing better)
+  const six=/(?<![\d.,\/])([0-3]\d)([01]\d)(\d{2})(?![\d.,\/])/g;
+  while((m=six.exec(T))){if(!free(m.index,6))continue;const yy=+m[3];if(yy<15||yy>NY-2000+8)continue;const before=out.length;push(2000+yy,+m[2],+m[1],m.index,6,false,m[0]);if(out.length>before)out[out.length-1].weak=true;}
   return out;
 }
 const shapeOf=s=>s.replace(/[A-Z]/g,"A").replace(/\d/g,"9");
@@ -1222,33 +1334,49 @@ function parseLabel(text,prevLots){
     const lastIdx=re=>{let i=-1,m;const g=new RegExp(re.source,"g");while((m=g.exec(before)))i=m.index;return i;};
     const ei=lastIdx(EXPKW),pi=lastIdx(PRODKW);
     let s=0,kind="";if(ei>pi){s+=10;kind="scadenza";}else if(pi>ei){s-=10;kind="produzione";}
-    const n=daysLeft(c.iso);if(n>=-30)s+=3;if(n<-365)s-=6;if(n>365*6)s-=4;if(c.y2)s-=1;
-    const ex=dates.find(d=>d.iso===c.iso);if(ex){if(s>ex.s){ex.s=s;ex.kind=kind;}continue;}
-    dates.push({iso:c.iso,s,kind,mOnly:c.mOnly});
+    const n=daysLeft(c.iso);if(n>=-30)s+=3;if(n<-365)s-=6;if(n>365*6)s-=4;if(c.y2)s-=1;if(c.weak)s-=4;
+    const ex=dates.find(d=>d.iso===c.iso);if(ex){ex.votes++;if(s>ex.s){ex.s=s;ex.kind=kind;}continue;}
+    dates.push({iso:c.iso,s,kind,mOnly:c.mOnly,votes:1});
   }
+  const segs=T.split("\f");
+  if(segs.length>1){
+    const segDates=segs.map(sg=>new Set(findDates(sg).map(x=>x.iso)));
+    for(const d of dates)d.votes=Math.max(1,segDates.filter(s=>s.has(d.iso)).length);
+  }
+  for(const d of dates)d.s+=Math.min(6,(d.votes-1)*2);
   dates.sort((a,b)=>b.s-a.s||(a.iso<b.iso?1:-1));
   const dateDigits=new Set(findDates(T).map(d=>d.raw.replace(/\D/g,"")));
   // ---- lots
-  const lots=[];const add=(v,s)=>{v=cleanLot(v);if(v.length<2||v.length>18||!/\d/.test(v))return;if(dateDigits.has(v.replace(/\D/g,""))&&/^\d+$/.test(v))return;
+  const lots=[];const add=(v,s)=>{v=cleanLot(v);if(v.length<2||v.length>18||!/\d/.test(v))return;if(/[\/.\-]/.test(v)&&findDates(v).length)return;if(/^\d+([.,]\d+)?(G|GR|KG|ML|CL|L|LT|E|EUR|%)$/.test(v))return;if(dateDigits.has(v.replace(/\D/g,""))&&/^\d+$/.test(v))return;
     if(/^(LOTTO|LOT|BATCH|SCAD|EXP|ENTRO|IL|DEL|N)$/.test(v))return;
-    const e=lots.find(l=>l.v===v);if(e){e.s=Math.max(e.s,s);return;}lots.push({v,s});};
-  const KW=/(?<![A-Z])(?:LOTTO|LOTE|LOT\.?\s*NO\.?|LOT(?![A-Z])|BATCH|ロット|批号|批次|로트)\s*(?:N[°.O]?\s*)?[:.\-#]?\s*/;
+    const e=lots.find(l=>l.v===v);if(e){e.votes++;e.s=Math.max(e.s,s);e.base=Math.max(e.base,s);return;}lots.push({v,s,base:s,votes:1});};
+  const KW=/(?<![A-Z])(?:LOTT[OEA0]|LOTE|LOT\.?\s*NO\.?|LOT(?![A-Z])|BATCH|ロット|批号|批次|로트)\s*(?:N[°.O]?\s*)?[:.\-#]?\s*/;
   lines.forEach((ln,i)=>{
     let m;const g=new RegExp(KW.source+"([A-Z0-9][A-Z0-9\\-\\/]{1,15})","g");
     while((m=g.exec(ln)))add(m[1],12);
     if(new RegExp(KW.source+"$").test(ln.trim())&&lines[i+1]){const nx=lines[i+1].trim().split(/\s+/)[0];if(/\d/.test(nx||""))add(nx,9);}
     const g2=/(?:^|[\s(])L\s*[.:]\s*([A-Z0-9][A-Z0-9\-\/]{1,15})/g;while((m=g2.exec(ln)))add(m[1],10);
     const g3=/(?:^|\s)L\s?(\d[A-Z0-9]{2,14})\b/g;while((m=g3.exec(ln)))add("L"+m[1],8);
+    // ink-jet line "date  L123456": the L is often read as 1, I or |
+    const g5=/\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{2,4}\s+[1I|]\.?(\d{5,12})\b/g;while((m=g5.exec(ln)))add("L"+m[1],8);
     // generic codes: letters+digits mixed, not dates
     const g4=/\b([A-Z]{0,4}\d[A-Z0-9\-]{2,12})\b/g;while((m=g4.exec(ln))){const v=m[1];if(/^\d{1,2}$/.test(v))continue;if(/^\d+[\-]\d+$/.test(v))continue;add(v,/[A-Z]/.test(v)&&/\d/.test(v)?2:1);}
   });
-  for(const l of lots)l.s+=lotSim(l.v,prevLots);
+  const coreOf=v=>v.replace(/\D/g,"");
+  const common=(a,b)=>{let best=0;for(let i=0;i<a.length;i++)for(let j=0;j<b.length;j++){let k=0;while(i+k<a.length&&j+k<b.length&&a[i+k]===b[j+k])k++;if(k>best)best=k;}return best;};
+  if(segs.length>1){const cs=segs.map(sg=>sg.replace(/[^A-Z0-9]/g,""));for(const l of lots){const c=l.v.replace(/[^A-Z0-9]/g,"");l.votes=Math.max(1,cs.filter(s=>s.includes(c)).length);}}
+  for(const l of lots){
+    l.s+=lotSim(l.v,prevLots)+Math.min(6,(l.votes-1)*2);
+    const cl=coreOf(l.v);if(cl.length>=4&&l.base>=8)for(const o of lots){if(o===l||o.base<8)continue;const co=coreOf(o.v);if(co.length>=4&&common(cl,co)>=4)l.s+=2;if(co.length>=4&&co.length<cl.length&&cl.includes(co))l.s+=3;}
+  }
   lots.sort((a,b)=>b.s-a.s);
-  const best=dates[0]||null,lotBest=lots.length&&lots[0].s>=4?lots[0]:null;
+  const best=dates[0]||null;
+  const okLot=l=>l.base>=8||(l.votes>=3&&coreOf(l.v).length>=5)||(prevLots&&prevLots.length&&lotSim(l.v,prevLots)>=7);
+  const lotBest=lots.find(okLot)||null;
   // ---- tokens for manual tap
   const tokens=[];const seen=new Set();
   for(const w of T.split(/\s+/)){const v=cleanLot(w);if(v.length<3||seen.has(v)||!/\d/.test(v))continue;seen.add(v);tokens.push(v);}
-  return{lot:lotBest?lotBest.v:null,expiry:best?best.iso:null,monthOnly:best?best.mOnly:false,strong:!!(best&&best.s>=10),
+  return{lot:lotBest?lotBest.v:null,expiry:best?best.iso:null,monthOnly:best?best.mOnly:false,strong:!!(best&&best.kind==="scadenza"&&best.s>=4),
     dates:dates.slice(0,4),lots:lots.filter(l=>l.s>=2).slice(0,4),tokens:tokens.slice(0,24)};
 }
 function parseDDT(text){
@@ -1401,6 +1529,7 @@ const A={
     if(!list.length){toast("Serve almeno una categoria");return;}
     try{await api.setSettings({...settings(),threshold:TH(),categories:list});toast("Categorie salvate");}catch(e){}},
   export(){exportCSV();},
+  "ocr-stop"(){S.ocrStop=S.ocrRun;const t=$("#ocrTxt");if(t)t.textContent="Mi fermo dopo questo passaggio…";},
   cand(el){
     let f=el.dataset.f,v=el.dataset.v;
     if(f==="auto"){const d=parseQuick(v)||(findDates(normText(v))[0]?{iso:findDates(normText(v))[0].iso}:null);if(d){f="exp";v=d.iso;}else f="lot";}
