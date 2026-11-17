@@ -1044,31 +1044,38 @@ async function readDoc(blob){
     if(!passes.some(p=>p.mode==="adapt6"&&!p.crop)&&alive()&&S.docStop!==token){
       const res=await ocr(blob,prog("Leggo la tabella"),"adapt6",rotated);if(!alive())return;passes.push({lines:res.lines,text:res.text,mode:"adapt6",rot:rotated,crop:null,cw:res.canvas.width,ch:res.canvas.height});
     }
-    let bestT=extractTable(mergePasses(passes));
+    const cands=[],ET=l=>{const t=extractTable(l);cands.push(t);return t;};
+    let bestT=ET(mergePasses(passes));
     const weak=t=>!t.items.length||t.items.filter(x=>x.qty!==null).length<t.items.length*0.7;
     if(weak(bestT)&&alive()&&S.docStop!==token){
       const TL=[];for(let ry=0;ry<3;ry++)for(let cx=0;cx<2;cx++){const tw=.5*1.35,th=1/3*1.6;const x0=Math.max(0,cx*.5-tw*.15),y0=Math.max(0,ry/3-th*.2);TL.push([x0,y0,Math.min(1,x0+tw),Math.min(1,y0+th)]);}
       for(let i=0;i<TL.length;i++){if(!alive()||S.docStop===token)break;if(passes.some(p=>p.crop&&p.crop.join()===TL[i].join()))continue;
         const res=await ocr(blob,prog(`Leggo la tabella ${i+1}/${TL.length}`),"tile",rotated,TL[i]);if(!alive())return;passes.push({lines:res.lines,text:res.text,mode:"tile",rot:rotated,crop:TL[i],cw:res.canvas.width,ch:res.canvas.height});}
-      const t2=extractTable(mergePasses(passes));if(t2.score>=bestT.score)bestT=t2;
+      const t2=ET(mergePasses(passes));if(t2.score>=bestT.score)bestT=t2;
     }
-    for(const p of fullP()){const t=extractTable(p.lines);if(t.score>bestT.score)bestT=t;}
+    for(const p of fullP()){const t=ET(p.lines);if(t.score>bestT.score)bestT=t;}
     {
       const full=passes.find(p=>!p.crop&&p.cw&&(p.rot||0)===(rotated||0));
-      const mt=extractTable(mergePasses(passes));
+      const mt=ET(mergePasses(passes));
       if(full&&(mt.cols||mt.items.length)&&alive()&&S.docStop!==token){
         const A=full.ch/full.cw,PH=2000*A;
         const f0=Math.max(0,mt.yTop/PH-0.012),f1=Math.min(1,Math.max(mt.yBot/PH+0.05,f0+0.15));
         try{
           const res=await ocr(blob,prog("Rileggo la tabella"),"tile",rotated,[0,f0,1,f1]);
           if(!alive())return;
-          const t3=extractTable(res.lines);
+          const t3=ET(res.lines);
           if(t3.score>=bestT.score*0.9&&t3.items.length>=bestT.items.length)bestT=t3;
           passes.push({lines:res.lines,text:res.text,mode:"tile",rot:rotated,crop:[0,f0,1,f1],cw:res.canvas.width,ch:res.canvas.height});
-          const t4=extractTable(mergePasses(passes));if(t4.score>bestT.score)bestT=t4;
+          const t4=ET(mergePasses(passes));if(t4.score>bestT.score)bestT=t4;
         }catch(e){if(!tessWorker)throw e;}
       }
     }
+    // fill holes in the chosen table with what other readings saw for the same row
+    {const key=s=>String(s||"").toUpperCase().replace(/O/g,"0").replace(/[^A-Z0-9]/g,"");
+      for(const it of bestT.items){const votes={};
+        for(const t of cands){if(t===bestT)continue;const o=t.items.find(x=>(it.code&&x.code&&(key(x.code)===key(it.code)||nameSim(key(x.code),key(it.code))>=0.82))||(!it.code&&it.desc&&x.desc&&nameSim(it.desc,x.desc)>=0.9));if(!o)continue;
+          if(o.qty!==null&&o.qty!==undefined)votes[o.qty]=(votes[o.qty]||0)+1;for(const f of ["lot","expiry","um"])if(!it[f]&&o[f])it[f]=o[f];}
+        if(it.qty===null){const b=Object.entries(votes).sort((a,b)=>b[1]-a[1])[0];if(b)it.qty=parseQty(b[0]);}}}
     const xf=extractFields(mergePasses(passes),text);for(const p of fullP()){const f=extractFields(p.lines,p.text);for(const k in f)if(!xf[k])xf[k]=f[k];}
     try{window.__kigenDocExtra={items:bestT.items,fields:xf,cols:bestT.cols};}catch(e){}
     try{const mv=visualLines(mergePasses(passes));window.__kigenMV=mv.map(l=>[Math.round(l.bbox.y0),l.words.map(w=>w.text+"@"+Math.round(w.bbox.x0)+"("+Math.round(w.confidence)+")").join(" ")]);}catch(e){}
@@ -1863,8 +1870,8 @@ function extractTable(rawLines){
     ws.forEach((w,k)=>{
       const t=String(w.text).trim(),cx=(w.bbox.x0+w.bbox.x1)/2;
       if(cx<leftLimit){
-        if(!code&&k===0&&!it.code&&/^[A-Z0-9\-\/.]{5,}$/.test(t.toUpperCase())&&/\d/.test(t)&&/[A-Z]{2}/i.test(t)&&ws.length>2){it.code=t.toUpperCase();return;}
-        if(code&&k===0&&!it.code&&/\d/.test(t)&&/^[A-Z0-9\-\/.]{2,}$/i.test(t.replace(/[|\]\[]/g,""))&&(!desc||w.bbox.x0<desc.x0)){it.code=t.replace(/[^A-Za-z0-9\-\/.]/g,"").toUpperCase();return;}
+        if(!code&&k===0&&!it.code&&/^[A-Z0-9\-\/.]{5,}$/.test(t.toUpperCase())&&/\d/.test(t)&&/[A-Z]{2}/i.test(t)&&ws.length>2){it.code=fixCode(t.toUpperCase());return;}
+        if(code&&k===0&&!it.code&&/\d/.test(t)&&/^[A-Z0-9\-\/.]{2,}$/i.test(t.replace(/[|\]\[]/g,""))&&(!desc||w.bbox.x0<desc.x0)){it.code=fixCode(t.replace(/[^A-Za-z0-9\-\/.]/g,"").toUpperCase());return;}
         dw.push(t);dconf.push(w.confidence||0);return;
       }
       const T=t.toUpperCase().replace(/[|\[\]]/g,"");if(!T)return;
@@ -1876,7 +1883,10 @@ function extractTable(rawLines){
       if(UMS.test(T.replace(/\.$/,""))&&hasT("um")&&!it.um){it.um=T.replace(/\.$/,"");return;}
       if(/^(4|5|10|22)[.,]0{1,2}$/.test(T))return;
       const Tn=T.replace(/[.,;:]+$/,"");
-      if(it.qty===null&&/^\d{1,3}$/.test(Tn)&&col.type!=="lot"){it.qty=parseQty(Tn);return;}
+      if(it.qty===null&&/^\d{1,3}$/.test(Tn)&&col.type!=="lot"){
+        // a column rule glued to the number is often read as a trailing "1" ("2|" -> "21")
+        const nx=ws[k+1];const glued=/^\d1$/.test(Tn)&&nx&&nx.bbox.x0-w.bbox.x1<hh*((w.confidence||0)<72?1.4:0.5);
+        it.qty=parseQty(glued?Tn[0]:Tn);return;}
       if(/^\d{1,6}[.,]\d{2}$/.test(Tn)&&(hasT("price")||hasT("amount"))&&col.type!=="qty")return;
       if(it.qty===null&&/^\d{1,3}([.,]\d{1,3})?$/.test(Tn)&&(col.type==="qty"||col.type==="vat"||col.type==="um"||!hasT("qty"))&&!(col.type==="price"||col.type==="amount")){it.qty=parseQty(Tn);return;}
       if(findDates(normText(t)).length){if(!it.expiry){const d=findDates(normText(t))[0];it.expiry=fixYear2(d);}return;}
@@ -1896,7 +1906,7 @@ function extractTable(rawLines){
         if(/^(4|5|10|22)[.,]0{1,2}$/.test(T)&&!right.length){tail.pop();changed=true;continue;}
         if(!it.lot&&!it.qty&&/\d/.test(T)&&(/[A-Z]/.test(T)&&T.length>=4||/^\d{5,}$/.test(T))&&!/^\d+(G|GR|KG|ML|L|LT)$/.test(T)&&tail.length>2){it.lot=cleanLot(T);tail.pop();changed=true;continue;}
         if(/^\d{1,6}[.,]\d{2}$/.test(T)&&tail.length>2&&!it.qty){tail.pop();changed=true;continue;}
-        if(it.qty===null&&/^\d{1,3}([.,]\d{1,3})?$/.test(T)&&tail.length>2&&(it.lot||it.expiry||it.um||!right.length)){it.qty=parseQty(T);tail.pop();changed=true;continue;}
+        if(it.qty===null&&/^\d{1,3}([.,]\d{1,3})?$/.test(T)&&tail.length>2&&(it.lot||it.expiry||it.um||!right.length)&&!/^(PZ|PZ\.|PEZZI|X|CONF|DA|N|N\.|NR)$/i.test(tail[tail.length-2]||"")){it.qty=parseQty(T);tail.pop();changed=true;continue;}
         if(!it.um&&UMS.test(T.replace(/\.$/,""))&&tail.length>2&&(it.qty!==null||it.lot)){it.um=T.replace(/\.$/,"");tail.pop();changed=true;continue;}
       }
       let cf=dconf.slice(0,tail.length);
@@ -1924,16 +1934,18 @@ const XFIELDS=[
   ["carrier","Vettore",/(VETTORE|TRASPORTO\s*A\s*CURA\s*DEL\w*|CORRIERE|TRASPORTATORE)/,"text1"],
   ["start","Inizio trasporto",/(INIZIO\s*TRASPORTO|DATA\s*(DI\s*)?INIZIO\s*TRASP\w*|DATA\s*(DEL\s*)?RITIRO|DATA\s*TRASPORTO)/,"datetime"],
   ["packages","Colli",/(N(R|UM|°)?\.?\s*COLLI|\bCOLLI\b)/,"int"],
+  ["weight","Peso",/(PESO\s*LORDO|P\.?\s*LORDO)/,"num"],
   ["weight","Peso",/(PESO\s*LORDO|P\.?\s*LORDO|PESO\s*NETTO|P\.?\s*NETTO|PESO\s*(KG)?)/,"num"],
   ["reason","Causale",/CAUSALE(\s*(DEL\s*)?TRASPORTO)?/,"text"],
   ["deliveryNote","Note consegna",/(NOTE\s*(DI\s*)?CONSEGNA|ANNOTAZIONI)/,"text"],
   ["customerCode","Codice cliente",/(COD(ICE)?\.?\s*CLIENTE|\bCLIENTE\b)/,"code"],
-  ["vat","Partita IVA cliente",/(PARTITA\s*IVA|P\.?\s?IVA)/,"vat"],
+  ["vat","Partita IVA cliente",/(PARTITA\s*IVA|P\.?\s?IVA|\bIVA\b)/,"vat"],
   ["payment","Pagamento",/(CONDIZION\w*\s*(DI\s*)?PAGAMENTO|MODALIT\w*\s*(DI\s*)?PAGAMENTO|MOD\.?\s*PAG\w*|\bPAGAMENTO\b)/,"text"],
   ["orderRef","Rif. ordine",null,"order"]];
 const XDELIVERY=["recipient","destination","carrier","start","packages","weight","reason","deliveryNote"],XCOMMERCIAL=["customerCode","vat","payment","orderRef"];
 const ANYLABEL=new RegExp(XFIELDS.filter(f=>f[2]).map(f=>f[2].source).join("|")+"|\\b(PAGINA|VALUTA|BANCA|AGENTE|VOLUME|TIPO\\s*SPEDIZIONE|ASPETTO|FIRMA|CODICE\\s*FISCALE|DATA\\s*DOC|N°\\s*DOCUMENTO|PORTO)\\b");
 function cutAtLabel(s){const m=s.slice(1).search(/\s(?=[A-ZÀ-Ü][A-Za-zà-ü.\s]{1,22}:)/);let t=m>=0?s.slice(0,m+1):s;const k=deacc(t).toUpperCase().slice(2).search(ANYLABEL);if(k>=0)t=t.slice(0,k+2);return t.trim();}
+function fixCode(c){let p;do{p=c;c=c.replace(/(\d)S/g,"$15").replace(/(\d)O/g,"$10");}while(c!==p);return c;}
 function extractFields(rawLines,text){
   const segs=lineSegments(visualLines(rawLines)).map(s=>({...s,conf:s.words.reduce((a,w)=>a+(w.confidence||0),0)/s.words.length})).sort((a,b)=>a.y0-b.y0||a.x0-b.x0);const H=Math.max(1,...segs.map(s=>s.y1));const out={};
   const valid=(kind,v)=>{v=String(v||"").trim();if(!v)return null;const U=deacc(v).toUpperCase();
@@ -1951,7 +1963,13 @@ function extractFields(rawLines,text){
       if(key==="vat"&&s.y0<H*0.16)continue;
       if(key==="customerCode"&&/SPETT|DESTINAT/.test(U))continue;
       let rest=cutAtLabel(s.t.slice(m.index+m[0].length).replace(/^[\s:.\-–]+/,""));
+      // label's own horizontal span, to read the value right under it in multi-label header rows
+      let pos=0,lx0=null,lx1=null;for(const w of s.words){const L=String(w.text).length,st=pos,en=pos+L;if(en>m.index&&st<m.index+m[0].length){lx0=lx0===null?w.bbox.x0:Math.min(lx0,w.bbox.x0);lx1=lx1===null?w.bbox.x1:Math.max(lx1,w.bbox.x1);}pos=en+1;}
+      const underWord=()=>{if(lx0===null||!["num","int","code","vat","datetime"].includes(kind))return null;
+        const c=(lx0+lx1)/2,cand=[];for(const o of segs)for(let wi=0;wi<o.words.length;wi++){const w=o.words[wi];if(w.bbox.y0<s.y1-s.h*0.4||w.bbox.y0-s.y1>s.h*2.6)continue;const wc=(w.bbox.x0+w.bbox.x1)/2;if(wc<lx0-s.h*1.5||wc>lx1+s.h*1.5)continue;cand.push({w,next:o.words[wi+1],d:Math.abs(wc-c)+(w.bbox.y0-s.y1)*0.5});}
+        cand.sort((a,b)=>a.d-b.d);for(const x of cand){const vv=valid(kind,x.w.text+(kind==="datetime"&&x.next?" "+x.next.text:""));if(vv)return vv;}return null;};
       let v=kind==="block"||kind==="text1"?null:valid(kind,rest);
+      if(!v)v=underWord();
       if(!v&&(kind==="block"||kind==="text1")&&rest&&valid("text",rest))v=valid("text",rest);
       if(!v){
         let rb=null,rd=1e9;for(const o of segs){if(o===s)continue;const cy=(o.y0+o.y1)/2,sy=(s.y0+s.y1)/2;if(Math.abs(cy-sy)<s.h*0.7&&o.x0>s.x1-s.h*0.3&&o.x0-s.x1<s.h*10){const d=o.x0-s.x1;if(d<rd){rd=d;rb=o;}}}
@@ -1971,6 +1989,9 @@ function extractFields(rawLines,text){
       if(v){out[key]=v;break;}
     }
   }
+  // transport reason with an unread label: a short standalone value like "C / Vendita" in the upper half
+  if(!out.reason){const RS=/^(C\s*\/\s*|CAUS\w*\s*)?(VENDITA|TENTATA\s+VENDITA|CONTO\s+VISIONE|C\s*\/\s*VISIONE|RESO|RESO\s+MERCE|OMAGGIO|C\s*\/?\s*LAVORAZIONE|DEPOSITO|TRASFERIMENTO|SOSTITUZIONE)\.?$/;
+    for(const s of segs){if(s.y0>H*0.5||s.words.length>5)continue;const U=deacc(s.t).toUpperCase().trim();if(RS.test(U)){out.reason=s.t.trim();break;}}}
   // order reference from text
   const T=normText(text).toUpperCase();
   const om=T.match(/(NS\.?\s*ORD\w*\.?|VS\.?\s*ORD\w*\.?|RIF\.?\s*ORDINE|ORDINE)\s*(N[°.]?\s*)?([A-Z0-9][A-Z0-9\/\-]{2,15})?\s*(DEL\s*(\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{2,4}))?/);
