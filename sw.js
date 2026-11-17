@@ -1,4 +1,4 @@
-const VERSION = "kigen-v8";
+const VERSION = "kigen-v9";
 const SHELL = ["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png", "./apple-touch-icon.png"];
 const RUNTIME = "kigen-runtime-v1";
 
