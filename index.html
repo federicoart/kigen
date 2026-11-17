@@ -333,6 +333,19 @@ select.inp{max-width:100%;text-overflow:ellipsis}
 .step .ms.big{margin-left:auto;font-size:30px;color:var(--sky)}
 .gate .skip{border:0;background:transparent;color:var(--ink3);font-size:13px;text-decoration:underline;padding:8px}
 body.gated nav,body.gated .fab{display:none!important}
+
+.inp.check{border-color:var(--kin);background:var(--kin-soft)}
+.cands{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:10px}
+.cands .cl{font-size:12px;font-weight:700;color:var(--ink2);margin-right:2px;min-width:64px}
+.cand{border:1.5px solid var(--line);background:var(--card);border-radius:999px;padding:5px 11px;font-size:13px;font-weight:500;display:inline-flex;align-items:center;gap:5px}
+.cand small{font-size:11px;color:var(--ink3);font-weight:500}
+.cand.on{border-color:var(--mint);background:var(--mint-soft);color:var(--mint);font-weight:700}
+.cand.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+details.raw{margin-top:10px;font-size:12.5px;color:var(--ink2)}
+details.raw summary{cursor:pointer;font-weight:700;color:var(--ink3);list-style:none;display:flex;align-items:center;gap:4px}
+details.raw summary::-webkit-details-marker{display:none}
+details.raw .cands{margin-top:8px}
+.ocr-tip{font-size:12px;color:var(--ink3);margin-top:8px}
 </style>
 </head>
 <body>
@@ -700,12 +713,12 @@ function renderAddSheet(opts){
   opts=opts||{};
   const fixed=opts.productId||null;
   const p=fixed?S.products[fixed]:null;
-  S.add={pid:fixed,fixed:!!fixed,cat:p?p.category:(opts.cat||S.lastCat||cats()[0].id),typed:""};
+  S.add={pid:fixed,fixed:!!fixed,cat:p?p.category:(opts.cat||S.lastCat||cats()[0].id),typed:""};S.ocr=null;
   openSheet(`<div class="sh-head"><h2>${p?"Nuovo lotto":"Aggiungi prodotto"}</h2><button class="icon-btn" data-action="close-sheet" aria-label="Chiudi"><span class="ms">close</span></button></div>
     ${photoOK?`<div class="ocr"><div class="ocr-btns">
       <label class="btn brand"><span class="ms">photo_camera</span>Foto etichetta<input type="file" accept="image/*" capture="environment" hidden data-photo="lot"></label>
       <label class="btn"><span class="ms">photo_library</span>Galleria<input type="file" accept="image/*" ${IMGMAX>1?"multiple":""} hidden data-photo="lot"></label></div>
-      <div class="thumbs" id="thumbs"></div><div class="ocr-status" id="ocrSt"></div></div>`:""}
+      <div class="thumbs" id="thumbs"></div><div class="ocr-status" id="ocrSt"></div><div id="ocrPick"></div></div>`:""}
     <div class="field"><span class="lbl">Prodotto</span><div id="prodBox"></div></div>
     <div class="field"><span class="lbl">Categoria</span><div class="pick" id="catPick"></div></div>
     <div class="field"><label for="fLot">Lotto <span class="opt">(facoltativo)</span></label><input class="inp mono" id="fLot" autocomplete="off" autocapitalize="characters" spellcheck="false" enterkeyhint="next" placeholder="es. L24312"></div>
@@ -715,6 +728,7 @@ function renderAddSheet(opts){
   renderProdBox();renderCatPick();dateHint("fExp");
   $$("#sheet [data-photo=lot]").forEach(el=>el.addEventListener("change",e=>{onLotPhoto(e.target.files);e.target.value="";}));
   $("#fLot").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();$("#fExp").focus();}});
+  ["fLot","fExp"].forEach(id=>$("#"+id).addEventListener("input",e=>{if(e.isTrusted!==false){e.target.dataset.touched="1";e.target.dataset.auto="";e.target.classList.remove("check","filled");}renderOcrPick();}));
   $("#fExp").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();saveAdd(true);}});
 }
 function renderProdBox(){
@@ -896,7 +910,7 @@ function renderDocForm(editId){
     <div class="ocr"><div class="ocr-btns">
       <label class="btn brand"><span class="ms">photo_camera</span>Fotografa<input type="file" accept="image/*" capture="environment" hidden data-photo="doc"></label>
       <label class="btn"><span class="ms">upload_file</span>Da file<input type="file" accept="image/*,application/pdf" multiple hidden data-photo="doc"></label></div>
-      <div class="pending" id="pend"></div><div class="ocr-status" id="docSt"></div>
+      <div class="pending" id="pend"></div><div class="ocr-status" id="docSt"></div><div id="docPick"></div>
       <div class="note">Puoi aggiungere più pagine. Dalla prima foto provo a leggere fornitore, numero e data.</div></div>
     <div class="field"><span class="lbl">Tipo</span><div class="pick" id="typePick"></div></div>
     <div class="field"><label for="dSup">Fornitore</label><input class="inp" id="dSup" list="supList" autocomplete="off" value="${esc(d?d.supplier:"")}" placeholder="es. Nome del fornitore"><datalist id="supList">${[...new Set(Object.values(S.docs).map(x=>x.supplier).filter(Boolean))].sort().map(s=>`<option value="${esc(s)}">`).join("")}</datalist></div>
@@ -932,15 +946,19 @@ async function readDoc(blob){
   const st=$("#docSt");if(!st)return;
   st.className="ocr-status";st.innerHTML=`<span class="spin"></span><span id="docTxt">Leggo il documento…</span>`;
   try{
-    const text=await ocr(blob,p=>{const t=$("#docTxt");if(t)t.textContent=`Leggo il documento… ${Math.round(p*100)}%`;});
+    const res=await ocr(blob,p=>{const t=$("#docTxt");if(t)t.textContent=`Leggo il documento… ${Math.round(p*100)}%`;});
     if(!$("#docSt"))return;
-    const r=parseDDT(text),got=[];
+    const text=res.text,r=parseDDT(text),got=[];
     if(/FATTURA/i.test(text)&&!/D\.?D\.?T|TRASPORTO/i.test(text)){S.dform.type="Fattura";renderTypePick();}
-    if(r.supplier&&!$("#dSup").value.trim()){const known=[...new Set(Object.values(S.docs).map(x=>x.supplier).filter(Boolean))].find(k=>r.supplier.toLowerCase().includes(k.toLowerCase()));$("#dSup").value=known||r.supplier;$("#dSup").classList.add("filled");got.push("fornitore");}
-    if(r.number&&!$("#dNum").value.trim()){$("#dNum").value=r.number;$("#dNum").classList.add("filled");got.push("numero");}
+    const fill=(sel,v)=>{const el=$(sel);if(!el||el.value.trim())return false;el.value=v;el.classList.add("filled");return true;};
+    if(r.supplier){const known=[...new Set(Object.values(S.docs).map(x=>x.supplier).filter(Boolean))].find(k=>r.supplier.toLowerCase().includes(k.toLowerCase()));if(fill("#dSup",known||r.supplier))got.push("fornitore");}
+    if(r.number&&fill("#dNum",r.number))got.push("numero");
     if(r.date){setDate("dDate",r.date);$("#dDate").classList.add("filled");got.push("data");}
     const s=$("#docSt");s.className="ocr-status "+(got.length?"ok":"err");
-    s.innerHTML=`<span class="ms">${got.length?"check_circle":"info"}</span><span>${got.length?"Letti: "+got.join(", ")+". Controlla prima di salvare.":"Non sono riuscito a leggere i dati: compilali a mano."}</span>`;
+    s.innerHTML=`<span class="ms">${got.length?"check_circle":"info"}</span><span>${got.length?"Letti: "+got.join(", ")+". Controlla prima di salvare.":"Non sono riuscito a leggere i dati: tocca qui sotto o compila a mano."}</span>`;
+    const chipsD=r.dates.map(d=>`<button type="button" class="cand" data-action="dcand" data-f="date" data-v="${d.iso}">${fmt(d.iso)}</button>`).join("");
+    const chipsN=r.nums.map(n=>`<button type="button" class="cand mono" data-action="dcand" data-f="num" data-v="${esc(n.v)}">${esc(n.v)}</button>`).join("");
+    const pk=$("#docPick");if(pk)pk.innerHTML=(chipsD&&r.dates.length>1?`<div class="cands"><span class="cl">Data</span>${chipsD}</div>`:"")+(chipsN&&r.nums.length>1?`<div class="cands"><span class="cl">Numero</span>${chipsN}</div>`:"");
   }catch(e){const s=$("#docSt");if(s){s.className="ocr-status err";s.innerHTML=`<span class="ms">wifi_off</span><span>Lettura non riuscita: compila a mano (la prima volta serve internet).</span>`;}}
 }
 async function saveDoc(btn){
@@ -1017,35 +1035,79 @@ function catRow(c){const n=Object.values(S.products).filter(p=>p.category===c.id
   return`<div class="cat-row" data-id="${esc(c.id)}"><input class="inp k" maxlength="2" value="${esc(c.kanji||"")}" aria-label="Simbolo"><input class="inp n" value="${esc(c.name)}" placeholder="Nome categoria" aria-label="Nome"><button class="icon-btn" data-action="del-cat" data-id="${esc(c.id)}" ${n?`disabled title="Contiene ${n} referenze"`:""} aria-label="Elimina"><span class="ms">${n?"lock":"delete"}</span></button></div>`;}
 
 /* ---------- lot photo reading ---------- */
+function prevLotsFor(){const a=S.add;if(!a)return[];const pid=a.pid||findProductId(a.typed||"");
+  const own=pid?lotsOf(pid).map(([,l])=>l.lot):[];return own.length?own:Object.values(S.lots).slice(-30).map(l=>l.lot);}
 async function onLotPhoto(files){
   if(!files||!files.length)return;
   const imgs=Array.from(files).slice(0,IMGMAX);
   $("#thumbs").innerHTML=imgs.map(f=>`<img alt="" src="${URL.createObjectURL(f)}">`).join("");
   const st=$("#ocrSt");st.className="ocr-status";st.innerHTML=`<span class="spin"></span><span id="ocrTxt">Leggo l’etichetta…</span>`;
+  const pick=$("#ocrPick");if(pick)pick.innerHTML="";
+  const prog=label=>p=>{const t=$("#ocrTxt");if(t)t.textContent=`${label}… ${Math.round(p*100)}%`;};
+  const alive=()=>$("#ocrSt")&&S.sheet?.type==="add";
   try{
-    let text="";
-    for(let i=0;i<imgs.length;i++){text+="\n"+await ocr(imgs[i],p=>{const t=$("#ocrTxt");if(t)t.textContent=`Leggo l’etichetta${imgs.length>1?` (${i+1}/${imgs.length})`:""}… ${Math.round(p*100)}%`;});}
-    if(!$("#ocrSt")||S.sheet?.type!=="add")return;
-    const r=parseLabel(text),got=[];
+    const prev=prevLotsFor();
+    let text="",words=[];
+    const run=async(label,mode,rot)=>{let t="",w=[];for(let i=0;i<imgs.length;i++){const r=await ocr(imgs[i],prog(label+(imgs.length>1?` (${i+1}/${imgs.length})`:"")),mode,rot);t+="\n"+r.text;w=w.concat(r.words);}return{t,w};};
+    let r0=await run("Leggo l’etichetta");if(!alive())return;
+    text=r0.t;words=r0.w;let r=parseLabel(text,prev);
     if(!r.lot||!r.expiry){
-      let t2="";
-      for(let i=0;i<imgs.length;i++){t2+="\n"+await ocr(imgs[i],p=>{const t=$("#ocrTxt");if(t)t.textContent=`Stampa a puntini? Riprovo… ${Math.round(p*100)}%`;},"dots");}
-      if(!$("#ocrSt")||S.sheet?.type!=="add")return;
-      const r2=parseLabel(t2);
-      if(!r.lot&&r2.lot)r.lot=r2.lot;
-      if(!r.expiry&&r2.expiry){r.expiry=r2.expiry;r.monthOnly=r2.monthOnly;r.strong=r2.strong;}
+      const r1=await run("Stampa a puntini? Riprovo","dots");if(!alive())return;
+      const p1=parseLabel(r1.t,prev);text+="\n"+r1.t;words=words.concat(r1.w);
+      r=mergeParse(r,p1);
     }
-    if(r.lot){$("#fLot").value=r.lot;$("#fLot").classList.add("filled");got.push("lotto");}
-    if(r.expiry){setDate("fExp",r.expiry);$("#fExp").classList.add("filled");got.push("scadenza");}
-    let msg=got.length?`Letti: ${got.join(" e ")}. Controlla bene prima di salvare.`:"Non ho trovato lotto o scadenza. Avvicinati all’etichetta con buona luce, oppure scrivili a mano.";
-    if(r.monthOnly&&r.expiry)msg+=" C’è solo mese e anno: impostato l’ultimo giorno.";
-    st.className="ocr-status "+(got.length===2&&r.strong?"ok":"err");
-    st.innerHTML=`<span class="ms">${got.length?"check_circle":"error"}</span><span>${esc(msg)}</span>`;
-    if(!r.lot)setTimeout(()=>{const l=$("#fLot");l&&!l.value&&l.focus();},50);
+    if(!r.expiry){
+      for(const rot of [90,270]){
+        const rr=await run("Provo a girare la foto",null,rot);if(!alive())return;
+        const pr=parseLabel(rr.t,prev);
+        if(pr.expiry){text+="\n"+rr.t;words=words.concat(rr.w);r=mergeParse(r,pr);break;}
+      }
+    }
+    S.ocr={r,words};
+    applyLotOcr(r,words);
   }catch(e){
     if(!$("#ocrSt"))return;
     st.className="ocr-status err";st.innerHTML=`<span class="ms">wifi_off</span><span>Lettura non riuscita. La prima volta serve internet per scaricare il lettore, poi funziona anche offline.</span>`;
   }
+}
+function mergeParse(a,b){
+  const out={...a};
+  if(!out.lot&&b.lot)out.lot=b.lot;
+  if(!out.expiry&&b.expiry){out.expiry=b.expiry;out.monthOnly=b.monthOnly;out.strong=b.strong;}
+  const dd=[...a.dates];for(const d of b.dates)if(!dd.some(x=>x.iso===d.iso))dd.push(d);out.dates=dd.slice(0,4);
+  const ll=[...a.lots];for(const l of b.lots)if(!ll.some(x=>x.v===l.v))ll.push(l);out.lots=ll.slice(0,4);
+  const tt=[...a.tokens];for(const t of b.tokens)if(!tt.includes(t))tt.push(t);out.tokens=tt.slice(0,24);
+  return out;
+}
+function canFill(el){return el&&(!el.value.trim()||el.dataset.auto==="1")&&el.dataset.touched!=="1";}
+function fillField(id,val,conf){
+  const el=document.getElementById(id);if(!el)return false;
+  if(id==="fExp")setDate(id,val);else el.value=val;
+  el.dataset.auto="1";el.dataset.touched="";el.classList.remove("filled","check","bad");el.classList.add(conf<70?"check":"filled");return true;
+}
+function applyLotOcr(r,words){
+  const st=$("#ocrSt");if(!st)return;
+  const got=[],warn=[];
+  const lotEl=$("#fLot"),expEl=$("#fExp");
+  if(r.lot&&canFill(lotEl)){const c=wordConf(words,r.lot);fillField("fLot",r.lot,c);got.push("lotto");if(c<70)warn.push("lotto");}
+  if(r.expiry&&canFill(expEl)){const raw=(r.dates[0]&&r.dates[0].iso)||r.expiry;const c=r.strong?90:65;fillField("fExp",raw,c);got.push("scadenza");if(c<70)warn.push("scadenza");}
+  let msg=got.length?`Letti: ${got.join(" e ")}.`:"Non ho trovato lotto o scadenza sicuri.";
+  if(warn.length)msg+=` Controlla ${warn.join(" e ")}: lettura incerta (in giallo).`;
+  else if(got.length)msg+=" Controlla e salva.";
+  if(r.monthOnly&&r.expiry)msg+=" C’è solo mese e anno: impostato l’ultimo giorno.";
+  if(!got.length)msg+=" Tocca qui sotto il valore giusto, oppure riprova più vicino e con più luce.";
+  st.className="ocr-status "+(got.length&&!warn.length?"ok":"err");
+  st.innerHTML=`<span class="ms">${got.length?(warn.length?"warning":"check_circle"):"search_off"}</span><span>${esc(msg)}</span>`;
+  renderOcrPick();
+}
+function renderOcrPick(){
+  const box=$("#ocrPick");if(!box||!S.ocr)return;const r=S.ocr.r;
+  const curE=getDate("fExp"),curL=($("#fLot")?.value||"").toUpperCase();
+  const dChips=r.dates.map(d=>`<button type="button" class="cand ${d.iso===curE?"on":""}" data-action="cand" data-f="exp" data-v="${d.iso}">${fmt(d.iso)}${d.kind?` <small>${d.kind}</small>`:""}</button>`).join("");
+  const lChips=r.lots.map(l=>`<button type="button" class="cand mono ${l.v===curL?"on":""}" data-action="cand" data-f="lot" data-v="${esc(l.v)}">${esc(l.v)}</button>`).join("");
+  const tChips=r.tokens.map(t=>`<button type="button" class="cand mono" data-action="cand" data-f="auto" data-v="${esc(t)}">${esc(t)}</button>`).join("");
+  box.innerHTML=(dChips?`<div class="cands"><span class="cl">Scadenza</span>${dChips}</div>`:"")+(lChips?`<div class="cands"><span class="cl">Lotto</span>${lChips}</div>`:"")
+    +(tChips?`<details class="raw"><summary><span class="ms" style="font-size:16px">text_snippet</span>Tutto il testo letto (tocca per usarlo)</summary><div class="cands">${tChips}</div><div class="ocr-tip">Una data va in Scadenza, il resto in Lotto.</div></details>`:"");
 }
 
 /* ---------- file save ---------- */
@@ -1062,14 +1124,16 @@ function loadTess(){
   return tessP;
 }
 function loadImg(url){return new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=rej;i.src=url;});}
-async function prepImg(blob,mode){
+async function prepImg(blob,mode,rot){
   const url=URL.createObjectURL(blob);
   try{
     const img=await loadImg(url);
     const sc=Math.min(2.5,2200/Math.max(img.naturalWidth,img.naturalHeight));
-    const W=Math.round(img.naturalWidth*sc),H=Math.round(img.naturalHeight*sc);
+    const w0=Math.round(img.naturalWidth*sc),h0=Math.round(img.naturalHeight*sc),sw=rot===90||rot===270;
+    const W=sw?h0:w0,H=sw?w0:h0;
     const c=document.createElement("canvas");c.width=W;c.height=H;
-    const x=c.getContext("2d");x.drawImage(img,0,0,W,H);
+    const x=c.getContext("2d");
+    if(rot){x.translate(W/2,H/2);x.rotate(rot*Math.PI/180);x.drawImage(img,-w0/2,-h0/2,w0,h0);x.setTransform(1,0,0,1,0,0);}else x.drawImage(img,0,0,W,H);
     const d=x.getImageData(0,0,W,H),p=d.data,n=W*H,g=new Float32Array(n);
     for(let i=0,j=0;j<n;i+=4,j++)g[j]=.299*p[i]+.587*p[i+1]+.114*p[i+2];
     if(mode==="dots"){
@@ -1090,7 +1154,7 @@ async function prepImg(blob,mode){
 }
 function withTimeout(pr,ms){let t;return Promise.race([pr,new Promise((_,rej)=>{t=setTimeout(()=>rej(new Error("timeout")),ms);})]).finally(()=>clearTimeout(t));}
 let tessFail=null;
-async function ocr(blob,onProg,mode){
+async function ocr(blob,onProg,mode,rot){
   await withTimeout(loadTess(),30000);
   tessProg=onProg;
   if(!tessWorker){
@@ -1099,59 +1163,117 @@ async function ocr(blob,onProg,mode){
     try{tessWorker=await withTimeout(Promise.race([wp,new Promise((_,rej)=>{const iv=setInterval(()=>{if(tessFail){clearInterval(iv);rej(tessFail);}},300);setTimeout(()=>clearInterval(iv),95000);})]),90000);}
     catch(e){wp.then(w=>w.terminate()).catch(()=>{});tessWorker=null;throw e;}
   }
-  const c=await prepImg(blob,mode);
-  try{const r=await withTimeout(tessWorker.recognize(c),120000);return(r&&r.data&&r.data.text)||"";}
+  const c=await prepImg(blob,mode,rot);
+  try{const r=await withTimeout(tessWorker.recognize(c),120000);const d=(r&&r.data)||{};return{text:d.text||"",words:(d.words||[]).map(w=>({text:w.text,confidence:w.confidence}))};}
   catch(e){try{await tessWorker.terminate();}catch(_){}tessWorker=null;throw e;}
 }
 const MON={GEN:1,JAN:1,FEB:2,MAR:3,APR:4,MAG:5,MAY:5,GIU:6,JUN:6,LUG:7,JUL:7,AGO:8,AUG:8,SET:9,SEP:9,OTT:10,OCT:10,NOV:11,DIC:12,DEC:12};
+/* OCR confuses look-alike characters: fix them only inside date-like groups (digits separated by / . -) */
+function fixDigits(s){return s.replace(/[OoQDU]/g,"0").replace(/[Il|!\]\[]/g,"1").replace(/[Ss$]/g,"5").replace(/B/g,"8").replace(/Z/g,"2").replace(/G/g,"6").replace(/T/g,"7");}
+function normText(raw){
+  let t=String(raw||"").replace(/\r/g,"").replace(/[‘’`´]/g,"'").replace(/[—–]/g,"-");
+  t=t.replace(/(?<![A-Za-z0-9])[0-9OoQDUIl|!SsBZGT$\]\[]{1,4}(?:\s?[\/.\-,]\s?[0-9OoQDUIl|!SsBZGT$\]\[]{1,4}){1,2}(?![A-Za-z0-9])/g,m=>{
+    const parts=m.split(/\s?[\/.\-,]\s?/);if(parts.length===2&&!parts.some(x=>x.length===4))return m;
+    const core=m.replace(/[\s\/.\-,]/g,""),dig=(core.match(/\d/g)||[]).length;
+    return dig>=Math.ceil(core.length*0.6)?fixDigits(m).replace(/,/g,"."):m;});
+  return t;
+}
+const EXPKW=/(SCAD|ENTRO|EXP|BEST|BBE|\bBB\b|TMC|T\.M\.C|USE BY|CONSUMAR|PREFERIB|VAL\.?|賞味|消費|保质|到期|유통|소비)/;
+const PRODKW=/(PROD|PKD|MFG|CONFEZ|PACK|DATA DI PRODUZIONE|製造|生产|제조)/;
 function findDates(T){
-  const out=[];const push=(y,m,d,idx,len,mOnly)=>{const y2=y<100;if(y<100)y+=2000;if(y<2000||y>2100||m<1||m>12)return;if(mOnly)d=new Date(y,m,0).getDate();const dt=new Date(y,m-1,d);if(dt.getMonth()!==m-1||dt.getDate()!==d)return;out.push({iso:iso(dt),idx,len,mOnly:!!mOnly,y2});};
-  let m;const used=[];
+  const out=[];const push=(y,m,d,idx,len,mOnly,raw)=>{const y2=y<100;if(y<100)y+=2000;if(y<2000||y>2100||m<1||m>12)return;if(mOnly)d=new Date(y,m,0).getDate();const dt=new Date(y,m-1,d);if(dt.getMonth()!==m-1||dt.getDate()!==d)return;out.push({iso:iso(dt),idx,len,mOnly:!!mOnly,y2,raw});};
+  let m;const used=[];const free=(i,l)=>!used.some(([a,b])=>i<b&&i+l>a);
   const ymd=/(20\d{2})\s*[\/.\-年]\s*(\d{1,2})\s*[\/.\-月]\s*(\d{1,2})/g;
-  while((m=ymd.exec(T))){push(+m[1],+m[2],+m[3],m.index,m[0].length);used.push([m.index,m.index+m[0].length]);}
+  while((m=ymd.exec(T))){push(+m[1],+m[2],+m[3],m.index,m[0].length,false,m[0]);used.push([m.index,m.index+m[0].length]);}
   const dmy=/(\d{1,2})\s*[\/.\-]\s*(\d{1,2})\s*[\/.\-]\s*(\d{4}|\d{2})(?!\d)/g;
-  while((m=dmy.exec(T))){if(used.some(([a,b])=>m.index<b&&m.index+m[0].length>a))continue;push(+m[3],+m[2],+m[1],m.index,m[0].length);used.push([m.index,m.index+m[0].length]);}
-  const mn=/(\d{1,2})\s+(GEN|FEB|MAR|APR|MAG|GIU|LUG|AGO|SET|OTT|NOV|DIC|JAN|MAY|JUN|JUL|AUG|SEP|OCT|DEC)[A-Z]*\.?\s+(\d{4}|\d{2})(?!\d)/g;
-  while((m=mn.exec(T))){push(+m[3],MON[m[2]],+m[1],m.index,m[0].length);used.push([m.index,m.index+m[0].length]);}
+  while((m=dmy.exec(T))){if(!free(m.index,m[0].length))continue;push(+m[3],+m[2],+m[1],m.index,m[0].length,false,m[0]);used.push([m.index,m.index+m[0].length]);}
+  const mn=/(\d{1,2})\s*(GEN|FEB|MAR|APR|MAG|GIU|LUG|AGO|SET|OTT|NOV|DIC|JAN|MAY|JUN|JUL|AUG|SEP|OCT|DEC)[A-Z]*\.?\s*(\d{4}|\d{2})(?!\d)/g;
+  while((m=mn.exec(T))){push(+m[3],MON[m[2]],+m[1],m.index,m[0].length,false,m[0]);used.push([m.index,m.index+m[0].length]);}
+  const mny=/\b(GEN|FEB|MAR|APR|MAG|GIU|LUG|AGO|SET|OTT|NOV|DIC|JAN|MAY|JUN|JUL|AUG|SEP|OCT|DEC)[A-Z]*\.?\s*(20\d{2})\b/g;
+  while((m=mny.exec(T))){if(!free(m.index,m[0].length))continue;push(+m[2],MON[m[1]],1,m.index,m[0].length,true,m[0]);used.push([m.index,m.index+m[0].length]);}
   const my=/(?<![\d\/.\-])(\d{1,2})\s*[\/.\-]\s*(20\d{2})(?![\d\/.\-])/g;
-  while((m=my.exec(T))){if(used.some(([a,b])=>m.index<b&&m.index+m[0].length>a))continue;push(+m[2],+m[1],1,m.index,m[0].length,true);}
+  while((m=my.exec(T))){if(!free(m.index,m[0].length))continue;push(+m[2],+m[1],1,m.index,m[0].length,true,m[0]);used.push([m.index,m.index+m[0].length]);}
+  // compact ink-jet dates without separators, only right after an expiry keyword: "EXP 141226", "SCAD 14122026"
+  const cmp=/(SCAD|EXP|BB|TMC|ENTRO)[^\d\n]{0,6}(\d{6}|\d{8})(?!\d)/g;
+  while((m=cmp.exec(T))){const s=m[2],i=m.index+m[0].length-s.length;if(!free(i,s.length))continue;
+    if(s.length===6)push(+s.slice(4),+s.slice(2,4),+s.slice(0,2),i,6,false,s);else push(+s.slice(4),+s.slice(2,4),+s.slice(0,2),i,8,false,s);used.push([i,i+s.length]);}
   return out;
 }
-function parseLabel(text){
-  const T=text.toUpperCase().replace(/[|]/g,"I").replace(/[‘’`´]/g,"'");
-  const exp=/(SCAD|ENTRO|EXP|BEST|BBE|\bBB\b|TMC|USE BY|CONSUMAR|PREFERIB|賞味|消費|保质|到期|유통|소비)/;
-  const prod=/(PROD|PKD|MFG|CONFEZ|PACK|製造|生产|제조)/;
-  let best=null;
+const shapeOf=s=>s.replace(/[A-Z]/g,"A").replace(/\d/g,"9");
+function lotSim(v,prev){
+  let best=0;for(const p of prev||[]){if(!p)continue;let s=0;const a=v.toUpperCase(),b=p.toUpperCase();
+    if(a.length===b.length)s+=3;if(a[0]===b[0])s+=2;if(shapeOf(a)===shapeOf(b))s+=4;
+    let k=0;while(k<a.length&&k<b.length&&a[k]===b[k])k++;s+=Math.min(k,3);if(s>best)best=s;}
+  return best;
+}
+function cleanLot(v){
+  let s=String(v||"").toUpperCase().replace(/^[:.\-\s]+|[:.\-\/\s]+$/g,"").replace(/\s+/g,"");
+  // in mostly-numeric codes, O and I are almost always 0 and 1 (keep a leading letter prefix like L or B)
+  const m=s.match(/^([A-Z]{0,2})(.*)$/);if(m&&(m[2].match(/\d/g)||[]).length>=3)s=m[1]+m[2].replace(/O/g,"0").replace(/I/g,"1");
+  return s;
+}
+function parseLabel(text,prevLots){
+  const T=normText(text).toUpperCase().replace(/[|]/g,"I");
+  const lines=T.split("\n");
+  // ---- dates
+  const dates=[];
   for(const c of findDates(T)){
     const before=T.slice(Math.max(0,c.idx-45),c.idx);
     const lastIdx=re=>{let i=-1,m;const g=new RegExp(re.source,"g");while((m=g.exec(before)))i=m.index;return i;};
-    const ei=lastIdx(exp),pi=lastIdx(prod);
-    let s=0;if(ei>pi)s+=10;else if(pi>ei)s-=10;
-    const n=daysLeft(c.iso);if(n>=-30)s+=3;if(n<-365)s-=6;if(n>365*6)s-=4;
-    if(!best||s>best.s||(s===best.s&&c.iso>best.iso))best={...c,s};
+    const ei=lastIdx(EXPKW),pi=lastIdx(PRODKW);
+    let s=0,kind="";if(ei>pi){s+=10;kind="scadenza";}else if(pi>ei){s-=10;kind="produzione";}
+    const n=daysLeft(c.iso);if(n>=-30)s+=3;if(n<-365)s-=6;if(n>365*6)s-=4;if(c.y2)s-=1;
+    const ex=dates.find(d=>d.iso===c.iso);if(ex){if(s>ex.s){ex.s=s;ex.kind=kind;}continue;}
+    dates.push({iso:c.iso,s,kind,mOnly:c.mOnly});
   }
-  let lot=null,m;
-  if((m=T.match(/(?:LOTTO|LOTE|LOT|BATCH|LOT\s*NO|ロット|批号|批次)\s*(?:N[°.O]?\s*)?[:.\-]?\s*([A-Z0-9][A-Z0-9\-\/]{2,15})/)))lot=m[1];
-  else if((m=T.match(/(?:^|[\s(])L\s*[.:]\s*([A-Z0-9][A-Z0-9\-\/]{2,15})/)))lot=m[1];
-  else if((m=T.match(/(?:^|\s)L\s?(\d[A-Z0-9]{3,14})\b/)))lot="L"+m[1];
-  if(lot){lot=lot.replace(/[.\-\/]+$/,"");if(best&&lot.replace(/\D/g,"")===best.iso.replace(/\D/g,""))lot=null;}
-  return{lot,expiry:best?best.iso:null,monthOnly:best?best.mOnly:false,strong:!!(best&&best.s>=10)};
+  dates.sort((a,b)=>b.s-a.s||(a.iso<b.iso?1:-1));
+  const dateDigits=new Set(findDates(T).map(d=>d.raw.replace(/\D/g,"")));
+  // ---- lots
+  const lots=[];const add=(v,s)=>{v=cleanLot(v);if(v.length<2||v.length>18||!/\d/.test(v))return;if(dateDigits.has(v.replace(/\D/g,""))&&/^\d+$/.test(v))return;
+    if(/^(LOTTO|LOT|BATCH|SCAD|EXP|ENTRO|IL|DEL|N)$/.test(v))return;
+    const e=lots.find(l=>l.v===v);if(e){e.s=Math.max(e.s,s);return;}lots.push({v,s});};
+  const KW=/(?<![A-Z])(?:LOTTO|LOTE|LOT\.?\s*NO\.?|LOT(?![A-Z])|BATCH|ロット|批号|批次|로트)\s*(?:N[°.O]?\s*)?[:.\-#]?\s*/;
+  lines.forEach((ln,i)=>{
+    let m;const g=new RegExp(KW.source+"([A-Z0-9][A-Z0-9\\-\\/]{1,15})","g");
+    while((m=g.exec(ln)))add(m[1],12);
+    if(new RegExp(KW.source+"$").test(ln.trim())&&lines[i+1]){const nx=lines[i+1].trim().split(/\s+/)[0];if(/\d/.test(nx||""))add(nx,9);}
+    const g2=/(?:^|[\s(])L\s*[.:]\s*([A-Z0-9][A-Z0-9\-\/]{1,15})/g;while((m=g2.exec(ln)))add(m[1],10);
+    const g3=/(?:^|\s)L\s?(\d[A-Z0-9]{2,14})\b/g;while((m=g3.exec(ln)))add("L"+m[1],8);
+    // generic codes: letters+digits mixed, not dates
+    const g4=/\b([A-Z]{0,4}\d[A-Z0-9\-]{2,12})\b/g;while((m=g4.exec(ln))){const v=m[1];if(/^\d{1,2}$/.test(v))continue;if(/^\d+[\-]\d+$/.test(v))continue;add(v,/[A-Z]/.test(v)&&/\d/.test(v)?2:1);}
+  });
+  for(const l of lots)l.s+=lotSim(l.v,prevLots);
+  lots.sort((a,b)=>b.s-a.s);
+  const best=dates[0]||null,lotBest=lots.length&&lots[0].s>=4?lots[0]:null;
+  // ---- tokens for manual tap
+  const tokens=[];const seen=new Set();
+  for(const w of T.split(/\s+/)){const v=cleanLot(w);if(v.length<3||seen.has(v)||!/\d/.test(v))continue;seen.add(v);tokens.push(v);}
+  return{lot:lotBest?lotBest.v:null,expiry:best?best.iso:null,monthOnly:best?best.mOnly:false,strong:!!(best&&best.s>=10),
+    dates:dates.slice(0,4),lots:lots.filter(l=>l.s>=2).slice(0,4),tokens:tokens.slice(0,24)};
 }
 function parseDDT(text){
-  const T=text.toUpperCase();
-  let number=null,m;
-  if((m=T.match(/(?:D\.?D\.?T\.?|DOCUMENTO DI TRASPORTO|BOLLA|DOC\.?)[^\n]{0,30}?N(?:UM(?:ERO)?|R)?\s*[°.ºO]?\s*[:.]?\s*([A-Z]{0,3}[\-\/]?\d[\dA-Z\/\-]{0,14})/)))number=m[1];
-  else if((m=T.match(/\bN(?:UMERO|R|\.|°|º)\s*[:.]?\s*(\d[\dA-Z\/\-]{0,14})/)))number=m[1];
-  let date=null;const ds=findDates(T);
-  for(const d of ds){const before=T.slice(Math.max(0,d.idx-30),d.idx);if(/DATA|DEL\b|DATE/.test(before)){date=d.iso;break;}}
-  if(!date&&ds.length)date=ds[0].iso;
-  if(date){const pick=ds.find(d=>d.iso===date);const ny=new Date().getFullYear(),yy=+date.slice(0,4);
-    if(pick&&pick.y2&&Math.abs(yy-ny)>1){let fixed=ny+date.slice(4);if(daysLeft(fixed)>7)fixed=(ny-1)+date.slice(4);if(parseISO(fixed))date=fixed;}}
+  const T=normText(text).toUpperCase();
+  const nums=[];const addN=(v,s)=>{v=cleanLot(v);if((v.match(/\d/g)||[]).length>=v.length/2)v=fixDigits(v);if(!v||v.length>16)return;const e=nums.find(x=>x.v===v);if(e){e.s=Math.max(e.s,s);return;}nums.push({v,s});};
+  let m;
+  const g1=/(?:D\.?D\.?T\.?|DOCUMENTO DI TRASPORTO|BOLLA|DOC\.?)[^\n]{0,30}?N(?:UM(?:ERO)?|R)?\s*[°.ºO]?\s*[:.]?\s*([A-Z]{0,3}[\-\/]?\d[\dA-Z\/\-]{0,14})/g;while((m=g1.exec(T)))addN(m[1],10);
+  const g2=/\bN(?:UMERO|R|\.|°|º)\s*[:.]?\s*(\d[\dA-Z\/\-]{0,14})/g;while((m=g2.exec(T)))addN(m[1],5);
+  nums.sort((a,b)=>b.s-a.s);
+  const ds=findDates(T),ny=new Date().getFullYear();
+  const dates=[];
+  for(const d of ds){let isoD=d.iso;if(d.y2&&Math.abs(+isoD.slice(0,4)-ny)>1){let f=ny+isoD.slice(4);if(daysLeft(f)>7)f=(ny-1)+isoD.slice(4);if(parseISO(f))isoD=f;}
+    const before=T.slice(Math.max(0,d.idx-30),d.idx);let s=/DATA|DEL\b|DATE/.test(before)?10:0;const n=daysLeft(isoD);if(n<=7&&n>-120)s+=4;if(EXPKW.test(before))s-=6;
+    const e=dates.find(x=>x.iso===isoD);if(e){e.s=Math.max(e.s,s);continue;}dates.push({iso:isoD,s});}
+  dates.sort((a,b)=>b.s-a.s);
   let supplier=null;
-  const lines=text.split(/\n/).map(s=>s.trim()).filter(s=>/[A-Za-z]{3}/.test(s));
-  const co=lines.find(l=>/\b(S\.?R\.?L|S\.?P\.?A|S\.?N\.?C|S\.?A\.?S|LTD|GMBH|SRLS)\b/i.test(l)&&!/DESTINAT|SPETT|LUOGO/i.test(l));
+  const lines=String(text).split(/\n/).map(s=>s.trim()).filter(s=>/[A-Za-z]{3}/.test(s));
+  const co=lines.find(l=>/\b(S\.?R\.?L|S\.?P\.?A|S\.?N\.?C|S\.?A\.?S|LTD|GMBH|SRLS)\b/i.test(l)&&!/DESTINAT|SPETT|LUOGO|CLIENTE/i.test(l));
   if(co)supplier=co.replace(/\s{2,}/g," ").slice(0,60);
-  return{number,date,supplier};
+  return{number:nums[0]?nums[0].v:null,date:dates[0]?dates[0].iso:null,supplier,nums:nums.slice(0,3),dates:dates.slice(0,3)};
+}
+function wordConf(words,v){
+  if(!words||!v)return 100;const V=v.replace(/[^A-Z0-9]/gi,"").toUpperCase();if(!V)return 100;
+  let best=null;for(const w of words){const t=String(w.text||"").replace(/[^A-Z0-9]/gi,"").toUpperCase();if(t&&(t.includes(V)||V.includes(t)&&t.length>=3)){if(best===null||w.confidence<best)best=w.confidence;}}
+  return best===null?60:best;
 }
 
 /* ---------- calendar reminders (.ics) ---------- */
@@ -1279,6 +1401,15 @@ const A={
     if(!list.length){toast("Serve almeno una categoria");return;}
     try{await api.setSettings({...settings(),threshold:TH(),categories:list});toast("Categorie salvate");}catch(e){}},
   export(){exportCSV();},
+  cand(el){
+    let f=el.dataset.f,v=el.dataset.v;
+    if(f==="auto"){const d=parseQuick(v)||(findDates(normText(v))[0]?{iso:findDates(normText(v))[0].iso}:null);if(d){f="exp";v=d.iso;}else f="lot";}
+    if(f==="exp"){setDate("fExp",v);const e=$("#fExp");e.dataset.touched="1";e.classList.remove("check","bad");e.classList.add("filled");}
+    else{const l=$("#fLot");l.value=v;l.dataset.touched="1";l.classList.remove("check","bad");l.classList.add("filled");}
+    renderOcrPick();
+  },
+  dcand(el){if(el.dataset.f==="date"){setDate("dDate",el.dataset.v);$("#dDate").classList.add("filled");}else{const n=$("#dNum");n.value=el.dataset.v;n.classList.add("filled");}
+    el.parentNode.querySelectorAll(".cand").forEach(b=>b.classList.toggle("on",b===el));},
   "cal-export"(){exportCal(false,false);},
   "cal-all"(){exportCal(true,false);},
   async "cal-share"(){const d=calDone();const rows=calRows(true);if(!rows.length){toast("Nessun lotto con scadenza futura");return;}await saveFile("kigen-promemoria.ics",new Blob([buildICS(rows)],{type:"text/calendar"}));rows.forEach(r=>d[calKey(r)]=Date.now());calSave(d);render();},
