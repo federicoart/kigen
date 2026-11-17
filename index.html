@@ -739,7 +739,7 @@ function renderProdBox(){
   }else{
     box.innerHTML=`<input class="inp" id="fName" autocomplete="off" enterkeyhint="next" placeholder="Scrivi il nome, es. Tonno a cubetti" value="${esc(a.typed)}"><div class="sugg" id="sugg"></div>`;
     const inp=$("#fName");
-    inp.addEventListener("input",()=>{a.typed=inp.value;inp.classList.remove("filled");renderSugg();});
+    inp.addEventListener("input",()=>{a.typed=inp.value;inp.classList.remove("filled","check");inp.dataset.touched="1";inp.dataset.auto="";renderSugg();});
     inp.addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();const ex=findProductId(inp.value);if(ex)pickProduct(ex);else{$("#sugg").innerHTML="";$("#fLot").focus();}}});
     renderSugg();
   }
@@ -1035,6 +1035,60 @@ function catRow(c){const n=Object.values(S.products).filter(p=>p.category===c.id
   return`<div class="cat-row" data-id="${esc(c.id)}"><input class="inp k" maxlength="2" value="${esc(c.kanji||"")}" aria-label="Simbolo"><input class="inp n" value="${esc(c.name)}" placeholder="Nome categoria" aria-label="Nome"><button class="icon-btn" data-action="del-cat" data-id="${esc(c.id)}" ${n?`disabled title="Contiene ${n} referenze"`:""} aria-label="Elimina"><span class="ms">${n?"lock":"delete"}</span></button></div>`;}
 
 /* ---------- lot photo reading ---------- */
+const NAMEBAD=/(PREZZO|IMPORTO|PESO|NETTO|LOTT|SCAD|ENTRO|CONSUM|TOTALE|EURO|€|\bKG\b|\bGR?\b|\bML\b|DATA|INGREDIENT|CONSERV|PRODOTTO|CONFEZIONAT|\bS\.?R\.?L\b|\bS\.?P\.?A\b|\bS\.?N\.?C\b|\bVIA\b|\bTEL|WWW|HTTP|ORIGINE|ALLEVAT|MACELLAT|NATO IN|SEZIONAT|TARA|VALORI|ENERGIA|CLASSE|AUTORIZZ|OPERATORE|ORGANISMO|CONTROLL|AGRICOLTURA|NUTRIZION|PROTEINE|GRASSI|CARBOIDRATI|ZUCCHERI|SALE\b|SENZA GLUTINE|RACCOLTA|VASSOIO|FILM|PLASTICA|COMUNE|STABILIMENTO|ITALIA\b|PREPARAZIONE|COTTURA|IDEALE|GUSTO|BENESSERE|SENZA\b|\([A-Z]{2}\)|CONSIGLIAT)/;
+const FOODW=/\b(POLLO|TONNO|SALMONE|FORMAGGIO|FILETTO|PETTO|ARROSTO|PEPERONI|SALSA|SOIA|RISO|SUSHI|NORI|ALGA|ALGHE|WAKAME|EDAMAME|GYOZA|RAVIOLI|NOODLES?|RAMEN|UDON|SOBA|MISO|TOFU|TEMPURA|PANKO|WASABI|ZENZERO|SESAMO|MOCHI|SURIMI|GAMBER\w*|CALAMAR\w*|POLPO|ANGUILLA|MAIONESE|ACETO|OLIO|MOZZARELLA|PROSCIUTTO|VITELLONE|BOVINO|MANZO|MAIALE|TACCHINO|VERDUR\w*|INSALATA|POMODOR\w*|FUNGHI|MIRIN|SAKE|KIMCHI|CURRY|DUMPLINGS?|INVOLTINI|URAMAKI|NIGIRI|HOSOMAKI|ONIGIRI|BAO|SPALMABILE|FRESCO|SURGELAT\w*|FETTE|BIO)\b/;
+function guessNames(lines){
+  const segs=[];
+  const med=a=>{const s=[...a].sort((x,y)=>x-y);return s.length?s[Math.floor(s.length/2)]:0;};
+  const passMed={};for(const l of lines||[]){const k=l.src||"x";(passMed[k]=passMed[k]||[]).push(...(l.words||[]).filter(w=>w.bbox&&/[A-Za-z]{2}/.test(w.text)).map(w=>w.bbox.y1-w.bbox.y0));}
+  for(const k in passMed)passMed[k]=med(passMed[k])||1;
+  for(const l of lines||[]){
+    const ws=(l.words||[]).filter(w=>w.bbox&&String(w.text).trim());
+    if(!ws.length)continue;
+    const hs=ws.filter(w=>/[A-Za-zÀ-ÿ]{2}/.test(w.text)).map(w=>w.bbox.y1-w.bbox.y0);
+    const mh=med(hs)||1;
+    let cur=[];const flush=()=>{if(cur.length)segs.push(cur);cur=[];};
+    ws.sort((a,b)=>a.bbox.x0-b.bbox.x0);
+    for(const w of ws){if(cur.length&&w.bbox.x0-cur[cur.length-1].bbox.x1>mh*2.0)flush();cur.push({...w,pm:passMed[l.src||"x"]});}
+    flush();
+  }
+  const cand=[];
+  for(const ws of segs){
+    let t=ws.map(w=>w.text).join(" ").replace(/[|_~"“”‘’=*#<>\[\]{}]/g," ").replace(/\s+/g," ").trim();
+    t=t.replace(/^[^A-Za-zÀ-ÿ]+|[^A-Za-zÀ-ÿ0-9.)]+$/g,"").replace(/\.$/,"").trim();
+    const T=t.toUpperCase(),nw=t.split(" ").length;
+    const letters=(t.match(/[A-Za-zÀ-ÿ]/g)||[]).length;
+    const conf=ws.reduce((s,w)=>s+(w.confidence||0),0)/ws.length;
+    if(t.length<4||t.length>40||letters<4||letters/t.replace(/\s/g,"").length<0.8||nw>6||conf<60||NAMEBAD.test(T))continue;
+    if(!/[A-Za-zÀ-ÿ]{3}/.test(t)||/,/.test(t))continue;
+    const hs=ws.filter(w=>/[A-Za-zÀ-ÿ]{2}/.test(w.text)).map(w=>w.bbox.y1-w.bbox.y0);
+    let hW=med(hs);if(!hW)continue;hW=hW/(ws[0].pm||1)*30;
+    t=t.replace(/\s+(A|DI|DA|E|CON|IN|AL|ALLA|DEL|PER)$/i,"");if(t.length<4)continue;
+    const upper=t===T&&/[A-Z]{3}/.test(t);
+    let s=hW*(upper?1.3:1)*(FOODW.test(T)?1.6:1)*(nw>=2&&nw<=4?1.1:1)*(conf/100);
+    const b={x0:Math.min(...ws.map(w=>w.bbox.x0)),x1:Math.max(...ws.map(w=>w.bbox.x1)),y0:Math.min(...ws.map(w=>w.bbox.y0)),y1:Math.max(...ws.map(w=>w.bbox.y1))};
+    cand.push({t,s,hW,upper,b,conf,src:ws[0].pm});
+  }
+  cand.sort((a,b)=>b.s-a.s);
+  try{window.__kigenNameCands=cand.slice(0,8).map(c=>[c.t,Math.round(c.s),c.hW]);window.__kigenNameSegs=segs.map(ws=>ws.map(w=>w.text+"("+Math.round(w.confidence)+")").join(" ")).filter(s=>/[A-Z]{4}/.test(s)).slice(0,40);}catch(e){}
+  const res=[];
+  for(const c of cand.slice(0,5)){
+    let name=c.t;
+    const next=c.upper&&cand.find(o=>o!==c&&o.upper&&o.src===c.src&&o.b.y0>c.b.y1-c.hW*0.3&&o.b.y0-c.b.y1<c.hW*0.7&&Math.abs(o.hW-c.hW)<c.hW*0.15&&o.b.x0<c.b.x1&&o.b.x1>c.b.x0);
+    if(next&&(name+" "+next.t).length<=40)name+=" "+next.t;
+    name=name.toLowerCase().replace(/\s+/g," ").trim();name=name.charAt(0).toUpperCase()+name.slice(1);
+    const sim=res.findIndex(r=>nameSim(r.n,name)>=0.8);
+    if(sim>=0){if(c.conf>res[sim].c+3)res[sim]={n:name,c:c.conf};continue;}
+    const ix=res.findIndex(r=>name.toLowerCase().startsWith(r.n.toLowerCase())&&name.length>r.n.length);
+    if(ix>=0)res[ix]={n:name,c:c.conf};else if(!res.some(r=>r.n.toLowerCase().includes(name.toLowerCase())))res.push({n:name,c:c.conf});
+  }
+  return res.slice(0,3).map(r=>r.n);
+}
+function nameSim(a,b){a=a.toLowerCase().replace(/[^a-z0-9à-ÿ]/g,"");b=b.toLowerCase().replace(/[^a-z0-9à-ÿ]/g,"");if(!a||!b)return 0;
+  const m=a.length,n=b.length,dp=Array.from({length:m+1},(_,i)=>[i]);for(let j=1;j<=n;j++)dp[0][j]=j;
+  for(let i=1;i<=m;i++)for(let j=1;j<=n;j++)dp[i][j]=Math.min(dp[i-1][j]+1,dp[i][j-1]+1,dp[i-1][j-1]+(a[i-1]===b[j-1]?0:1));
+  return 1-dp[m][n]/Math.max(m,n);}
+function matchProduct(name){let best=null,bs=0;for(const[id,p]of Object.entries(S.products)){const s=nameSim(name,p.name);if(s>bs){bs=s;best=id;}}return bs>=0.82?best:null;}
 function prevLotsFor(){const a=S.add;if(!a)return[];const pid=a.pid||findProductId(a.typed||"");
   return pid?lotsOf(pid).map(([,l])=>l.lot).filter(Boolean):[];}
 async function onLotPhoto(files){
@@ -1049,7 +1103,7 @@ async function onLotPhoto(files){
   const prog=label=>p=>{const t=$("#ocrTxt");if(t&&S.ocrRun===token)t.textContent=`${label}… ${Math.round(p*100)}%`;};
   try{
     const prev=prevLotsFor();
-    let text="",words=[],r=parseLabel("",prev);
+    let text="",words=[],r=parseLabel("",prev),nameLines=[];
     const TILES=[];for(let ry=0;ry<3;ry++)for(let cx=0;cx<2;cx++){const tw=.5*1.35,th=1/3*1.6;const x0=Math.max(0,cx*.5-tw*.15),y0=Math.max(0,ry/3-th*.2);TILES.push([x0,y0,Math.min(1,x0+tw),Math.min(1,y0+th)]);}
     const plan=[["Leggo l’etichetta","std"],["Guardo meglio","adapt6"],["Guardo meglio","adapt"],["Stampa a puntini?","dots"],
       ...TILES.map((t,i)=>[`Cerco nei dettagli ${i+1}/${TILES.length}`,"tile",0,t]),
@@ -1062,14 +1116,17 @@ async function onLotPhoto(files){
       for(let i=0;i<imgs.length;i++){
         const res=await ocr(imgs[i],prog(label+(imgs.length>1?` (${i+1}/${imgs.length})`:"")),mode,rot,crop);
         if(!alive())return;
-        text+="\n\f\n"+res.text;words=words.concat(res.words);
+        text+="\n\f\n"+res.text;words=words.concat(res.words);if(res.mode==="std"||res.mode==="adapt")nameLines=nameLines.concat(res.lines.map(l=>({...l,src:res.mode})));
         try{(window.__kigenPasses=window.__kigenPasses||[]).push({label,mode,rot:rot||0,crop:crop||null,text:res.text});}catch(e){}
       }
       r=parseLabel(text,prev);
       S.ocr={r,words};applyLotOcr(r,words,true);
     }
     if(!alive())return;
-    S.ocr={r,words};try{window.__kigenLastOcr=text;}catch(e){}
+    if(!S.add.pid)r.names=guessNames(nameLines);else r.names=[];
+    if(r.names.length<1&&!S.add.pid&&imgs.length&&alive()){try{const res=await ocr(imgs[0],prog("Cerco il nome"),"adapt6");r.names=guessNames(res.lines);}catch(e){}}
+    if(!alive())return;
+    S.ocr={r,words};try{window.__kigenLastOcr=text;window.__kigenNames=r.names;window.__kigenLines=nameLines.map(l=>({t:l.text,h:l.bbox?l.bbox.y1-l.bbox.y0:0,c:Math.round(l.confidence||0),s:l.src,w:(l.words||[]).length}));}catch(e){}
     applyLotOcr(r,words,false);
   }catch(e){
     if(!$("#ocrSt")||S.ocrRun!==token)return;
@@ -1095,13 +1152,22 @@ function applyLotOcr(r,words,partial){
   const st=$("#ocrSt");if(!st)return;
   const got=[],warn=[];
   const lotEl=$("#fLot"),expEl=$("#fExp");
+  if(!partial&&r.names&&r.names.length&&!S.add.pid){
+    const nm=$("#fName");
+    if(nm&&(!nm.value.trim()||nm.dataset.auto==="1")&&nm.dataset.touched!=="1"){
+      const ex=matchProduct(r.names[0]);
+      if(ex){pickProduct(ex);got.push("prodotto (già in inventario)");}
+      else{S.add.typed=r.names[0];renderProdBox();const n2=$("#fName");if(n2){n2.classList.add("check");n2.dataset.auto="1";}got.push("nome");warn.push("nome");}
+    }
+  }
   if(r.lot&&canFill(lotEl)){const c=wordConf(words,r.lot);fillField("fLot",r.lot,c);got.push("lotto");if(c<70)warn.push("lotto");}
   if(r.expiry&&canFill(expEl)){const raw=(r.dates[0]&&r.dates[0].iso)||r.expiry;const c=r.strong?90:65;fillField("fExp",raw,c);got.push("scadenza");if(c<70)warn.push("scadenza");}
   let msg=got.length?`Letti: ${got.join(" e ")}.`:"Non ho trovato lotto o scadenza sicuri.";
   if(warn.length)msg+=` Controlla ${warn.join(" e ")}: lettura incerta (in giallo).`;
   else if(got.length)msg+=" Controlla e salva.";
   if(r.monthOnly&&r.expiry)msg+=" C’è solo mese e anno: impostato l’ultimo giorno.";
-  if(!got.length)msg+=" Tocca qui sotto il valore giusto, oppure riprova più vicino e con più luce.";
+  if(!r.expiry&&r.prodOnly)msg+=` Ho trovato solo la data di confezionamento (${fmt(r.prodOnly)}): la scadenza va scritta a mano.`;
+  if(!got.length&&!r.prodOnly)msg+=" Tocca qui sotto il valore giusto, oppure riprova più vicino e con più luce.";
   if(partial){renderOcrPick();return;}
   st.className="ocr-status "+(got.length&&!warn.length?"ok":"err");
   st.innerHTML=`<span class="ms">${got.length?(warn.length?"warning":"check_circle"):"search_off"}</span><span>${esc(msg)}</span>`;
@@ -1110,10 +1176,11 @@ function applyLotOcr(r,words,partial){
 function renderOcrPick(){
   const box=$("#ocrPick");if(!box||!S.ocr)return;const r=S.ocr.r;
   const curE=getDate("fExp"),curL=($("#fLot")?.value||"").toUpperCase();
-  const dChips=r.dates.map(d=>`<button type="button" class="cand ${d.iso===curE?"on":""}" data-action="cand" data-f="exp" data-v="${d.iso}">${fmt(d.iso)}${d.kind?` <small>${d.kind}</small>`:""}</button>`).join("");
+  const dChips=r.dates.map(d=>`<button type="button" class="cand ${d.iso===curE?"on":""}" data-action="cand" data-f="exp" data-v="${d.iso}">${fmt(d.iso)}${d.kind?` <small>${d.kind==="produzione"?"confezionamento":d.kind}</small>`:""}</button>`).join("");
   const lChips=r.lots.map(l=>`<button type="button" class="cand mono ${l.v===curL?"on":""}" data-action="cand" data-f="lot" data-v="${esc(l.v)}">${esc(l.v)}</button>`).join("");
   const tChips=r.tokens.map(t=>`<button type="button" class="cand mono" data-action="cand" data-f="auto" data-v="${esc(t)}">${esc(t)}</button>`).join("");
-  box.innerHTML=(dChips?`<div class="cands"><span class="cl">Scadenza</span>${dChips}</div>`:"")+(lChips?`<div class="cands"><span class="cl">Lotto</span>${lChips}</div>`:"")
+  const nChips=(r.names||[]).map(n=>`<button type="button" class="cand" data-action="cand" data-f="name" data-v="${esc(n)}">${esc(n)}</button>`).join("");
+  box.innerHTML=(nChips&&!S.add.pid?`<div class="cands"><span class="cl">Nome</span>${nChips}</div>`:"")+(dChips?`<div class="cands"><span class="cl">Scadenza</span>${dChips}</div>`:"")+(lChips?`<div class="cands"><span class="cl">Lotto</span>${lChips}</div>`:"")
     +(tChips?`<details class="raw"><summary><span class="ms" style="font-size:16px">text_snippet</span>Tutto il testo letto (tocca per usarlo)</summary><div class="cands">${tChips}</div><div class="ocr-tip">Una data va in Scadenza, il resto in Lotto.</div></details>`:"");
 }
 
@@ -1229,6 +1296,7 @@ async function ocr(blob,onProg,mode,rot,crop){
   const c=await prepImg(blob,mode||"std",rot,crop);
   const d=await recog(c);
   const words=(d.words||[]).map(w=>({text:w.text,confidence:w.confidence,bbox:w.bbox}));
+  const lines=(d.lines||[]).map(l=>({text:String(l.text||"").trim(),confidence:l.confidence,bbox:l.bbox,words:(l.words||[]).map(w=>({text:w.text,bbox:w.bbox,confidence:w.confidence}))}));
   let extra="";
   if(adv){
     const cand=words.filter(w=>/\d/.test(w.text)&&w.text.replace(/[^0-9]/g,"").length>=3&&w.confidence<92&&!findDates(normText(w.text)).length).sort((a,b)=>a.confidence-b.confidence).slice(0,8);
@@ -1238,16 +1306,17 @@ async function ocr(blob,onProg,mode,rot,crop){
       if(!findDates(normText(w.text)).length&&findDates(normText(t)).length){extra+="\n"+t;w.alt=t;}
     }
     await tessSet(psm,"");
-    extra+="\n"+pairWords(words).join("\n");
   }
-  return{text:(d.text||"")+extra,words};
+  extra+="\n"+pairWords(words).join("\n");
+  return{text:(d.text||"")+extra,words,lines,mode:mode||"std"};
 }
 /* labels in columns: take the value to the right of, or under, "Lotto" / "entro" */
 function pairWords(ws){
   const out=[];
   for(const k of ws){
     const t=String(k.text).toUpperCase().replace(/[^A-Z0-9]/g,"");
-    const isLot=/^(LOTT[OEA0]|LOTE|LOT|BATCH)$/.test(t),isExp=/^(ENTRO|SCAD|SCADENZA|EXP|BBE|TMC|AVANT|CONSUMARE|CONSUMARSI)$/.test(t);
+    const isLot=/^(LOTT[OEA0]|LOTE|LOT|BATCH)$/.test(t),isProd=/^(CONF|PROD|PKD|MFG|SURGELATO|CONGELATO|CONFEZIONATO|CONFEZIONAMENTO|IMBALLATO|PRODOTTO)$/.test(t);
+    const isExp=isProd||/^(ENTRO|SCAD|SCADENZA|EXP|BBE|TMC|AVANT|CONSUMARE|CONSUMARSI)$/.test(t);
     if(!isLot&&!isExp||!k.bbox)continue;
     const h=Math.max(4,k.bbox.y1-k.bbox.y0),kcy=(k.bbox.y0+k.bbox.y1)/2;
     let best=null,bd=1e9;
@@ -1256,7 +1325,7 @@ function pairWords(ws){
       if(isLot&&v.replace(/\D/g,"").length<3)continue;
       if(isExp&&!findDates(normText(v)).length&&!/^\d{6}$/.test(v.replace(/\D/g,"")))continue;
       const cy=(w.bbox.y0+w.bbox.y1)/2;let dist=null;
-      if(isExp){
+      if(isExp&&!isProd){
         if(PRODKW.test(String(w.text).toUpperCase()))continue;
         const wh=Math.max(4,w.bbox.y1-w.bbox.y0);
         const leftProd=ws.some(o=>o!==w&&o.bbox&&Math.abs((o.bbox.y0+o.bbox.y1)/2-cy)<wh*0.7&&o.bbox.x1<=w.bbox.x0+wh&&w.bbox.x0-o.bbox.x1<wh*8&&PRODKW.test(String(o.text).toUpperCase()+" IL:"));
@@ -1266,7 +1335,7 @@ function pairWords(ws){
       else if(w.bbox.y0>=k.bbox.y1-h*0.3&&w.bbox.y0-k.bbox.y1<h*(isExp?4:3)&&w.bbox.x1>=k.bbox.x0-h&&w.bbox.x0<=k.bbox.x1+h*(isExp?18:4))dist=1000+(w.bbox.y0-k.bbox.y1)*2+Math.max(0,w.bbox.x0-k.bbox.x1)*0.4;
       if(dist!==null&&dist<bd){bd=dist;best=w;}
     }
-    if(best)out.push((isLot?"LOTTO ":"SCADENZA ")+(best.alt||best.text));
+    if(best)out.push((isLot?"LOTTO ":isProd?"CONFEZIONAMENTO ":"SCADENZA ")+(best.alt||best.text));
   }
   return out;
 }
@@ -1282,7 +1351,7 @@ function normText(raw){
   return t;
 }
 const EXPKW=/(SCAD|[AE]NTR[O0]|EMTRO|EXP|BEST|BBE|\bBB\b|TMC|T\.M\.C|USE BY|CONSUMAR|PREFERIB|AVANT|CONSOMMER|HALTBAR|MHD|CADUCIDAD|ANTES DE|賞味|消費|保质|到期|유통|소비)/;
-const PRODKW=/(PROD|PKD|MFG|CONFEZ|PACK|IMBALL|SURGELAT\w*\s*I?[L1I]?\s*[:.]|CONGELAT\w*\s*I?[L1I]?\s*[:.]|DATA DI PRODUZIONE|製造|生产|제조)/;
+const PRODKW=/(CONFEZIONAMENTO|PROD|PKD|MFG|CONFEZ|\bCONF\b|PACK|IMBALL|SURGELAT\w*\s*I?[L1I]?\s*[:.]|CONGELAT\w*\s*I?[L1I]?\s*[:.]|DATA DI PRODUZIONE|製造|生产|제조)/;
 function findDates(T){
   const out=[];const NY=new Date().getFullYear();
   const push=(y,m,d,idx,len,mOnly,raw)=>{const y2=y<100;if(y<100)y+=2000;
@@ -1335,15 +1404,16 @@ function parseLabel(text,prevLots){
     const ei=lastIdx(EXPKW),pi=lastIdx(PRODKW);
     let s=0,kind="";if(ei>pi){s+=10;kind="scadenza";}else if(pi>ei){s-=10;kind="produzione";}
     const n=daysLeft(c.iso);if(n>=-30)s+=3;if(n<-365)s-=6;if(n>365*6)s-=4;if(c.y2)s-=1;if(c.weak)s-=4;
-    const ex=dates.find(d=>d.iso===c.iso);if(ex){ex.votes++;if(s>ex.s){ex.s=s;ex.kind=kind;}continue;}
-    dates.push({iso:c.iso,s,kind,mOnly:c.mOnly,votes:1});
+    const ex=dates.find(d=>d.iso===c.iso);
+    if(ex){ex.votes++;if(kind==="produzione")ex.prod=true;if(kind==="scadenza")ex.exp=true;if(s>ex.s){ex.s=s;ex.kind=kind;}continue;}
+    dates.push({iso:c.iso,s,kind,mOnly:c.mOnly,votes:1,prod:kind==="produzione",exp:kind==="scadenza"});
   }
   const segs=T.split("\f");
   if(segs.length>1){
     const segDates=segs.map(sg=>new Set(findDates(sg).map(x=>x.iso)));
     for(const d of dates)d.votes=Math.max(1,segDates.filter(s=>s.has(d.iso)).length);
   }
-  for(const d of dates)d.s+=Math.min(6,(d.votes-1)*2);
+  for(const d of dates){d.s+=Math.min(6,(d.votes-1)*2);if(d.prod&&!d.exp){d.kind="produzione";d.s=Math.min(d.s,-5);}else if(d.exp)d.kind="scadenza";}
   dates.sort((a,b)=>b.s-a.s||(a.iso<b.iso?1:-1));
   const dateDigits=new Set(findDates(T).map(d=>d.raw.replace(/\D/g,"")));
   // ---- lots
@@ -1370,13 +1440,13 @@ function parseLabel(text,prevLots){
     const cl=coreOf(l.v);if(cl.length>=4&&l.base>=8)for(const o of lots){if(o===l||o.base<8)continue;const co=coreOf(o.v);if(co.length>=4&&common(cl,co)>=4)l.s+=2;if(co.length>=4&&co.length<cl.length&&cl.includes(co))l.s+=3;}
   }
   lots.sort((a,b)=>b.s-a.s);
-  const best=dates[0]||null;
+  const best=dates.find(d=>d.kind!=="produzione")||null;
   const okLot=l=>l.base>=8||(l.votes>=3&&coreOf(l.v).length>=5)||(prevLots&&prevLots.length&&lotSim(l.v,prevLots)>=7);
   const lotBest=lots.find(okLot)||null;
   // ---- tokens for manual tap
   const tokens=[];const seen=new Set();
   for(const w of T.split(/\s+/)){const v=cleanLot(w);if(v.length<3||seen.has(v)||!/\d/.test(v))continue;seen.add(v);tokens.push(v);}
-  return{lot:lotBest?lotBest.v:null,expiry:best?best.iso:null,monthOnly:best?best.mOnly:false,strong:!!(best&&best.kind==="scadenza"&&best.s>=4),
+  return{prodOnly:!best&&dates.length?dates[0].iso:null,lot:lotBest?lotBest.v:null,expiry:best?best.iso:null,monthOnly:best?best.mOnly:false,strong:!!(best&&best.kind==="scadenza"&&best.s>=4),
     dates:dates.slice(0,4),lots:lots.filter(l=>l.s>=2).slice(0,4),tokens:tokens.slice(0,24)};
 }
 function parseDDT(text){
@@ -1533,6 +1603,7 @@ const A={
   cand(el){
     let f=el.dataset.f,v=el.dataset.v;
     if(f==="auto"){const d=parseQuick(v)||(findDates(normText(v))[0]?{iso:findDates(normText(v))[0].iso}:null);if(d){f="exp";v=d.iso;}else f="lot";}
+    if(f==="name"){const ex=matchProduct(v);if(ex)pickProduct(ex);else{S.add.pid=null;S.add.typed=v;renderProdBox();renderCatPick();const n=$("#fName");if(n){n.dataset.touched="1";n.classList.add("filled");}}renderOcrPick();return;}
     if(f==="exp"){setDate("fExp",v);const e=$("#fExp");e.dataset.touched="1";e.classList.remove("check","bad");e.classList.add("filled");}
     else{const l=$("#fLot");l.value=v;l.dataset.touched="1";l.classList.remove("check","bad");l.classList.add("filled");}
     renderOcrPick();
