@@ -34,7 +34,7 @@
 html,body{margin:0;background:var(--paper);color:var(--ink);font-family:"M PLUS Rounded 1c",system-ui,sans-serif;font-size:15px;line-height:1.45}
 button,input,select,textarea{font:inherit;color:inherit}
 button{cursor:pointer}
-.ms{font-family:"Material Symbols Rounded";font-weight:400;font-style:normal;font-size:22px;line-height:1;letter-spacing:normal;text-transform:none;display:inline-block;white-space:nowrap;direction:ltr;-webkit-font-smoothing:antialiased;font-variation-settings:"FILL" 0,"wght" 400,"GRAD" 0,"opsz" 24;vertical-align:middle}
+.ms{width:1em;height:1em;overflow:hidden;flex:none;text-align:center;font-family:"Material Symbols Rounded";font-weight:400;font-style:normal;font-size:22px;line-height:1;letter-spacing:normal;text-transform:none;display:inline-block;white-space:nowrap;direction:ltr;-webkit-font-smoothing:antialiased;font-variation-settings:"FILL" 0,"wght" 400,"GRAD" 0,"opsz" 24;vertical-align:middle}
 .ms.fill{font-variation-settings:"FILL" 1,"wght" 400,"GRAD" 0,"opsz" 24}
 
 /* header + logo */
@@ -260,7 +260,9 @@ nav .nb{position:absolute;top:4px;left:calc(50% + 6px);background:var(--shu);col
 .box h4 .ms{font-size:18px;color:var(--ai)}
 .box p{margin:0 0 8px;font-size:13px;color:var(--ink2)}
 .inline{display:flex;gap:8px;align-items:flex-start}
-.inline>div{flex:1}
+.inline>div{flex:1;min-width:0}
+select.inp{max-width:100%;text-overflow:ellipsis}
+.sheet{overflow-x:hidden}
 
 /* dialog + toast */
 .dialog{position:fixed;inset:0;z-index:60;display:none;place-items:center;padding:20px;background:rgba(20,18,15,.4)}
@@ -985,9 +987,9 @@ function folderMenu(){
     <div class="list" style="box-shadow:none;border:1px solid var(--line)">
       <button class="item" data-action="new-folder"><span class="ico folder"><span class="ms">create_new_folder</span></span><span class="txt"><span class="t1">Nuova sottocartella</span></span></button>
       <button class="item" data-action="rename-folder"><span class="ico"><span class="ms">edit</span></span><span class="txt"><span class="t1">Rinomina</span></span></button>
-      <div class="item" style="cursor:default"><span class="ico"><span class="ms">drive_file_move</span></span><span class="txt"><span class="t1">Sposta in</span><select class="inp" id="fmvSel" style="margin-top:6px">${folderOptions(f.parentId||"",false,fid)}</select></span><button class="btn" data-action="move-folder">Sposta</button></div>
       <button class="item" data-action="del-folder" ${empty?"":"disabled"}><span class="ico"><span class="ms" style="color:var(--shu)">delete</span></span><span class="txt"><span class="t1" style="color:var(--shu)">Elimina cartella</span><span class="t2">${empty?"La cartella è vuota":"Svuotala prima di eliminarla"}</span></span></button>
-    </div>`,{type:"folder",id:fid});
+    </div>
+    <div class="box"><h4><span class="ms">drive_file_move</span>Sposta la cartella in</h4><div class="inline"><div><select class="inp" id="fmvSel">${folderOptions(f.parentId||"",false,fid)}</select></div><button class="btn primary" style="min-height:46px" data-action="move-folder">Sposta</button></div></div>`,{type:"folder",id:fid});
 }
 
 /* ---------- settings ---------- */
@@ -1025,6 +1027,14 @@ async function onLotPhoto(files){
     for(let i=0;i<imgs.length;i++){text+="\n"+await ocr(imgs[i],p=>{const t=$("#ocrTxt");if(t)t.textContent=`Leggo l’etichetta${imgs.length>1?` (${i+1}/${imgs.length})`:""}… ${Math.round(p*100)}%`;});}
     if(!$("#ocrSt")||S.sheet?.type!=="add")return;
     const r=parseLabel(text),got=[];
+    if(!r.lot||!r.expiry){
+      let t2="";
+      for(let i=0;i<imgs.length;i++){t2+="\n"+await ocr(imgs[i],p=>{const t=$("#ocrTxt");if(t)t.textContent=`Stampa a puntini? Riprovo… ${Math.round(p*100)}%`;},"dots");}
+      if(!$("#ocrSt")||S.sheet?.type!=="add")return;
+      const r2=parseLabel(t2);
+      if(!r.lot&&r2.lot)r.lot=r2.lot;
+      if(!r.expiry&&r2.expiry){r.expiry=r2.expiry;r.monthOnly=r2.monthOnly;r.strong=r2.strong;}
+    }
     if(r.lot){$("#fLot").value=r.lot;$("#fLot").classList.add("filled");got.push("lotto");}
     if(r.expiry){setDate("fExp",r.expiry);$("#fExp").classList.add("filled");got.push("scadenza");}
     let msg=got.length?`Letti: ${got.join(" e ")}. Controlla bene prima di salvare.`:"Non ho trovato lotto o scadenza. Avvicinati all’etichetta con buona luce, oppure scrivili a mano.";
@@ -1052,29 +1062,50 @@ function loadTess(){
   return tessP;
 }
 function loadImg(url){return new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=rej;i.src=url;});}
-async function prepImg(blob){
+async function prepImg(blob,mode){
   const url=URL.createObjectURL(blob);
   try{
     const img=await loadImg(url);
     const sc=Math.min(2.5,2200/Math.max(img.naturalWidth,img.naturalHeight));
-    const c=document.createElement("canvas");c.width=Math.round(img.naturalWidth*sc);c.height=Math.round(img.naturalHeight*sc);
-    const x=c.getContext("2d");x.drawImage(img,0,0,c.width,c.height);
-    const d=x.getImageData(0,0,c.width,c.height),p=d.data;
-    for(let i=0;i<p.length;i+=4){let g=.299*p[i]+.587*p[i+1]+.114*p[i+2];g=(g-128)*1.6+128;g=g<0?0:g>255?255:g;p[i]=p[i+1]=p[i+2]=g;}
+    const W=Math.round(img.naturalWidth*sc),H=Math.round(img.naturalHeight*sc);
+    const c=document.createElement("canvas");c.width=W;c.height=H;
+    const x=c.getContext("2d");x.drawImage(img,0,0,W,H);
+    const d=x.getImageData(0,0,W,H),p=d.data,n=W*H,g=new Float32Array(n);
+    for(let i=0,j=0;j<n;i+=4,j++)g[j]=.299*p[i]+.587*p[i+1]+.114*p[i+2];
+    if(mode==="dots"){
+      // merge ink-jet dots: separable box blur, then Otsu threshold
+      const r=Math.max(2,Math.round(Math.max(W,H)/400)),t=new Float32Array(n),k=2*r+1;
+      for(let y=0;y<H;y++){let s=0;const o=y*W;for(let i=-r;i<=r;i++)s+=g[o+Math.min(W-1,Math.max(0,i))];for(let xx=0;xx<W;xx++){t[o+xx]=s/k;s+=g[o+Math.min(W-1,xx+r+1)]-g[o+Math.max(0,xx-r)];}}
+      for(let xx=0;xx<W;xx++){let s=0;for(let i=-r;i<=r;i++)s+=t[Math.min(H-1,Math.max(0,i))*W+xx];for(let y=0;y<H;y++){g[y*W+xx]=s/k;s+=t[Math.min(H-1,y+r+1)*W+xx]-t[Math.max(0,y-r)*W+xx];}}
+      const hist=new Array(256).fill(0);for(let j=0;j<n;j++)hist[g[j]|0]++;
+      let sum=0;for(let i=0;i<256;i++)sum+=i*hist[i];let wb=0,sb=0,best=0,th=128;
+      for(let i=0;i<256;i++){wb+=hist[i];if(!wb)continue;const wf=n-wb;if(!wf)break;sb+=i*hist[i];const mb=sb/wb,mf=(sum-sb)/wf,v=wb*wf*(mb-mf)*(mb-mf);if(v>best){best=v;th=i;}}
+      for(let j=0;j<n;j++)g[j]=g[j]<th?0:255;
+    }else{
+      for(let j=0;j<n;j++){let v=(g[j]-128)*1.6+128;g[j]=v<0?0:v>255?255:v;}
+    }
+    for(let i=0,j=0;j<n;i+=4,j++)p[i]=p[i+1]=p[i+2]=g[j];
     x.putImageData(d,0,0);return c;
   }finally{URL.revokeObjectURL(url);}
 }
-async function ocr(blob,onProg){
-  await loadTess();
+function withTimeout(pr,ms){let t;return Promise.race([pr,new Promise((_,rej)=>{t=setTimeout(()=>rej(new Error("timeout")),ms);})]).finally(()=>clearTimeout(t));}
+let tessFail=null;
+async function ocr(blob,onProg,mode){
+  await withTimeout(loadTess(),30000);
   tessProg=onProg;
-  if(!tessWorker)tessWorker=await Tesseract.createWorker(["ita","eng"],1,{logger:m=>{if(tessProg&&m.status==="recognizing text")tessProg(m.progress);}});
-  const c=await prepImg(blob);
-  const r=await tessWorker.recognize(c);
-  return(r&&r.data&&r.data.text)||"";
+  if(!tessWorker){
+    tessFail=null;
+    const wp=Tesseract.createWorker(["ita","eng"],1,{logger:m=>{if(tessProg&&m.status==="recognizing text")tessProg(m.progress);},errorHandler:e=>{tessFail=e;}});
+    try{tessWorker=await withTimeout(Promise.race([wp,new Promise((_,rej)=>{const iv=setInterval(()=>{if(tessFail){clearInterval(iv);rej(tessFail);}},300);setTimeout(()=>clearInterval(iv),95000);})]),90000);}
+    catch(e){wp.then(w=>w.terminate()).catch(()=>{});tessWorker=null;throw e;}
+  }
+  const c=await prepImg(blob,mode);
+  try{const r=await withTimeout(tessWorker.recognize(c),120000);return(r&&r.data&&r.data.text)||"";}
+  catch(e){try{await tessWorker.terminate();}catch(_){}tessWorker=null;throw e;}
 }
 const MON={GEN:1,JAN:1,FEB:2,MAR:3,APR:4,MAG:5,MAY:5,GIU:6,JUN:6,LUG:7,JUL:7,AGO:8,AUG:8,SET:9,SEP:9,OTT:10,OCT:10,NOV:11,DIC:12,DEC:12};
 function findDates(T){
-  const out=[];const push=(y,m,d,idx,len,mOnly)=>{if(y<100)y+=2000;if(y<2000||y>2100||m<1||m>12)return;if(mOnly)d=new Date(y,m,0).getDate();const dt=new Date(y,m-1,d);if(dt.getMonth()!==m-1||dt.getDate()!==d)return;out.push({iso:iso(dt),idx,len,mOnly:!!mOnly});};
+  const out=[];const push=(y,m,d,idx,len,mOnly)=>{const y2=y<100;if(y<100)y+=2000;if(y<2000||y>2100||m<1||m>12)return;if(mOnly)d=new Date(y,m,0).getDate();const dt=new Date(y,m-1,d);if(dt.getMonth()!==m-1||dt.getDate()!==d)return;out.push({iso:iso(dt),idx,len,mOnly:!!mOnly,y2});};
   let m;const used=[];
   const ymd=/(20\d{2})\s*[\/.\-年]\s*(\d{1,2})\s*[\/.\-月]\s*(\d{1,2})/g;
   while((m=ymd.exec(T))){push(+m[1],+m[2],+m[3],m.index,m[0].length);used.push([m.index,m.index+m[0].length]);}
@@ -1114,6 +1145,8 @@ function parseDDT(text){
   let date=null;const ds=findDates(T);
   for(const d of ds){const before=T.slice(Math.max(0,d.idx-30),d.idx);if(/DATA|DEL\b|DATE/.test(before)){date=d.iso;break;}}
   if(!date&&ds.length)date=ds[0].iso;
+  if(date){const pick=ds.find(d=>d.iso===date);const ny=new Date().getFullYear(),yy=+date.slice(0,4);
+    if(pick&&pick.y2&&Math.abs(yy-ny)>1){let fixed=ny+date.slice(4);if(daysLeft(fixed)>7)fixed=(ny-1)+date.slice(4);if(parseISO(fixed))date=fixed;}}
   let supplier=null;
   const lines=text.split(/\n/).map(s=>s.trim()).filter(s=>/[A-Za-z]{3}/.test(s));
   const co=lines.find(l=>/\b(S\.?R\.?L|S\.?P\.?A|S\.?N\.?C|S\.?A\.?S|LTD|GMBH|SRLS)\b/i.test(l)&&!/DESTINAT|SPETT|LUOGO/i.test(l));
@@ -1303,7 +1336,7 @@ function init(){
   $("#logo").innerHTML=mascot("happy");
   startLocal();
   try{if(navigator.storage&&navigator.storage.persist)navigator.storage.persist();}catch(e){}
-  if("serviceWorker" in navigator&&location.protocol==="https:")navigator.serviceWorker.register("sw.js").catch(()=>{});
+  if("serviceWorker" in navigator&&window.isSecureContext)navigator.serviceWorker.register("sw.js").catch(()=>{});
 }
 init();
 })();
