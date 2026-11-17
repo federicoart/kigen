@@ -1476,7 +1476,7 @@ function parseLabel(text,prevLots){
   return{prodOnly:!best&&dates.length?dates[0].iso:null,lot:lotBest?lotBest.v:null,expiry:best?best.iso:null,monthOnly:best?best.mOnly:false,strong:!!(best&&best.kind==="scadenza"&&best.s>=4),
     dates:dates.slice(0,4),lots:lots.filter(l=>l.s>=2).slice(0,4),tokens:tokens.slice(0,24)};
 }
-const RECIPKW=/(DESTINAT|SPETT|LUOGO DI DESTINAZ|DESTINAZIONE|CLIENTE|CONSEGNA A|INTESTAT)/;
+const RECIPKW=/(DESTINAT|SPETT|LUOGO DI DESTINAZ|DESTINAZIONE|CLIENTE|CONSEGNA A|INTESTAT|VETTORE|TRASPORTATORE|CORRIERE|AGENTE|SPEDIZIONIERE)/;
 const SENDERKW=/(MITTENTE|CEDENTE|FORNITORE|VENDITORE|EMITTENTE)/;
 const COSUFFIX=/\b(S\.?\s?R\.?\s?L\.?S?|S\.?\s?P\.?\s?A\.?|S\.?\s?N\.?\s?C\.?|S\.?\s?A\.?\s?S\.?|LTD|GMBH|SOC\.?\s?COOP|S\.?\s?C\.?\s?A\.?\s?R\.?\s?L)\b/;
 function cleanSupplier(s){
@@ -1494,14 +1494,14 @@ function parseDDT(text){
     {const mm=v.match(/^([A-Z]{1,4}[\/\-])(.*)$/);if(mm){if((mm[2].match(/\d/g)||[]).length>=mm[2].length/2)v=mm[1]+fixDigits(mm[2]);}else if((v.match(/\d/g)||[]).length>=v.length/2&&!/[A-Z]{2}/.test(v))v=fixDigits(v);}
     if(findDates(v).length&&/[\/.\-]/.test(v))return;
     if(/^\d{11}$/.test(v.replace(/\D/g,""))&&v.replace(/\D/g,"").length===v.length)s-=10;
-    if(ctx&&/(ORDINE|ORD\.|RIF\.?|CLIENTE|COD\.?|P\.?\s?IVA|TEL|FAX|REA|CAP|CF|COLLI|PAG)\W*$/.test(ctx))s-=8;
+    if(ctx&&/(ORDINE|ORD\.|RIF\.?|CLIENTE|COD\.?|P\.?\s?IVA|TEL|FAX|REA|CAP|CF|COLLI|PAG|ALBO|ISCR\w*|CCIAA)\W*$/.test(ctx))s-=10;
     const e=nums.find(x=>x.v===v);if(e){e.s=Math.max(e.s,s);return;}nums.push({v,s});};
   let m;
   const NUMV="([A-Z]{0,4}[\\-\\/]?\\d[\\dA-Z\\/\\-.]{0,15})";
   const g1=new RegExp("(?:D\\.?\\s?D\\.?\\s?T\\.?|DOCUMENTO DI TRASPORTO|DOC(?:UMENTO)?\\.?\\s?DI\\s?TRASP\\w*|BOLLA(?: DI CONSEGNA)?|FATTURA(?: ACCOMPAGNATORIA)?|DOC\\.)[^\\n]{0,30}?N(?:UM(?:ERO)?|R|O)?\\s*[°.ºO]?\\s*[:.]?\\s*"+NUMV,"g");
   while((m=g1.exec(T)))addN(m[1],10,T.slice(Math.max(0,m.index-15),m.index));
   const g2=new RegExp("(?:\\bN(?:UMERO|R|\\.|°|º)|NUMERO DOC\\w*)\\s*[:.]?\\s*"+NUMV,"g");
-  while((m=g2.exec(T)))addN(m[1],/NUMERO DOC/.test(m[0])?9:5,T.slice(Math.max(0,m.index-15),m.index));
+  while((m=g2.exec(T)))addN(m[1],/NUMERO DOC/.test(m[0])?11:5,T.slice(Math.max(0,m.index-15),m.index));
   const allRefs=(T.match(/NUMERO DOC [^\n]+/g)||[]).map(x=>cleanLot(x.slice(11)));
   for(const n of nums){const c=n.v;n.votes=segs.length>1?Math.max(1,segs.filter(sg=>sg.replace(/\s/g,"").includes(c)).length):1;n.votes+=allRefs.filter(x=>x===c).length;n.s+=Math.min(6,(n.votes-1)*2);}
   for(const n of nums)for(const o of nums){if(o===n)continue;if(n.v.length>o.v.length&&n.v.startsWith(o.v)&&o.v.length>=3){n.s=Math.max(n.s,o.s)+1;o.s-=2;}}
@@ -1512,7 +1512,8 @@ function parseDDT(text){
     const before=sg.slice(Math.max(0,d.idx-34),d.idx);
     let s=0;
     if(/(DATA DOC|DATA|\bDEL\b|\bDATE\b)\W*$/.test(before)||/(DATA|\bDEL\b)[^\n]{0,14}$/.test(before))s+=10;
-    if(/(TRASPORTO|RITIRO|ORDINE|ORD\.|SCAD|PAGAMENTO|RICEVUT|CONSEGNA PREVISTA|NASCITA)[^\n]{0,20}$/.test(before))s-=6;
+    if(/(TRASPORTO|RITIRO|ORDINE|ORD\.|\bRIF\b|RIF\.|SCAD|PAGAMENTO|RICEVUT|CONSEGNA|CONS\b|NASCITA|D\.?P\.?R)[^\n]{0,24}$/.test(before))s-=8;
+    if(/DATA DOC\W*$/.test(before))s+=6;
     const n=daysLeft(isoD);if(n>7)s-=12;else if(n>=-120)s+=4;else if(n<-365)s-=6;
     const e=dates.find(x=>x.iso===isoD);if(e){e.votes++;e.s=Math.max(e.s,s);continue;}dates.push({iso:isoD,s,votes:1});
   }
@@ -1534,6 +1535,19 @@ function parseDDT(text){
       const v=cleanSupplier(L);if(v.length>=3)sup.push({v,s:s-idx*0.05});
     }
   }
+  // brand: website or e-mail domain in the header, confirmed by a word of the logo when possible
+  const doms=[...String(text).matchAll(/(?:WWW\.\s?|@)([A-Z0-9][A-Z0-9\-]{2,30})\.(?:IT|COM|EU|NET|ORG|BIZ|SHOP|FOOD)\b/gi)].map(x=>x[1].toUpperCase());
+  const logoHit=D=>lines.some(l=>!/WWW|@/i.test(l)&&new RegExp("\\b"+D.replace(/[^A-Z0-9]/g,".")+"\\b").test(l.toUpperCase()));
+  const domCount=d=>doms.filter(x=>x===d).length;
+  const dom=[...new Set(doms)].sort((a,b)=>(logoHit(b)-logoHit(a))||(domCount(b)-domCount(a)))[0];
+  let brand=null;
+  if(dom&&!/^(GMAIL|LIBERO|HOTMAIL|OUTLOOK|YAHOO|PEC|LEGALMAIL|TISCALI|VIRGILIO|ARUBA)$/i.test(dom)){
+    const D=dom.toUpperCase();const hit=lines.find(l=>new RegExp("\\b"+D.replace(/[^A-Z0-9]/g,".")+"\\b").test(l.toUpperCase())&&!/WWW|@/i.test(l));
+    brand=D.charAt(0)+D.slice(1).toLowerCase();if(hit)brand=D;
+    if(!isRecipName(brand))sup.push({v:brand,s:hit?9:7});
+  }
+  for(const x of sup){if(brand&&/^(S\.?\s?R\.?\s?L\.?S?|S\.?\s?P\.?\s?A\.?|S\.?\s?N\.?\s?C\.?|S\.?\s?A\.?\s?S\.?)$/i.test(x.v.trim())){x.v=brand+" "+x.v.trim().toUpperCase();x.s=Math.max(x.s,10);}else if(/^(S\.?\s?R\.?\s?L|S\.?\s?P\.?\s?A|S\.?\s?N\.?\s?C|S\.?\s?A\.?\s?S)\.?$/i.test(x.v.trim()))x.s-=20;}
+  function isRecipName(v){return[...recips].some(r=>nameSim(r,v)>=0.75||r.toUpperCase().includes(v.toUpperCase())&&v.length>=5);}
   const isRecip=v=>[...recips].some(r=>nameSim(r,v)>=0.75||v.toUpperCase().includes(r.toUpperCase())||r.toUpperCase().includes(v.toUpperCase())&&v.length>=8);
   for(const x of sup)if(isRecip(x.v))x.s-=30;
   // merge near-duplicates (same company read slightly differently): keep best score, add votes
@@ -1574,6 +1588,7 @@ async function refineDocNumber(c,words,gray){
   for(let i=0;i<words.length;i++){
     const k=words[i];if(!k.bbox)continue;const t=String(k.text).toUpperCase().replace(/[^A-Z°.]/g,"");
     const prev=words.slice(Math.max(0,i-4),i).map(w=>String(w.text).toUpperCase()).join(" ");
+    if(/(ALBO|ISCR|REA|IVA|CCIAA)/.test(prev.split(" ").slice(-2).join(" ")))continue;
     const isN=(/^(N|N\.|N°|NR|NR\.|NUM|NUMERO)$/.test(t)&&/(TRASPORTO|D\.?D\.?T|BOLLA|DOC|FATTURA)/.test(prev))||/^(D\.?D\.?T\.?)$/.test(t);
     const isHead=/^NUMERO$/.test(t);
     if(!isN&&!isHead)continue;
@@ -1604,7 +1619,9 @@ function pairDocWords(ws){
   const out=[];
   for(const k of ws){
     const t=String(k.text).toUpperCase().replace(/[^A-Z]/g,"");
-    const isNum=/^(NUMERO|NUM|NR|NUMDOC)$/.test(t),isDate=/^(DATA|DATADOC)$/.test(t);
+    const i=ws.indexOf(k),pw=i>0?String(ws[i-1].text).toUpperCase().replace(/[^A-Z°.]/g,""):"",nw=i<ws.length-1?String(ws[i+1].text).toUpperCase().replace(/[^A-Z]/g,""):"";
+    const isNum=/^(NUMERO|NUM|NR|NUMDOC)$/.test(t)&&!/^(ALBO|ISCR|REA)/.test(pw)||(/^(DOCUMENTO|DOC)$/.test(t)&&/^(N°?|N\.|NR\.?|NUM\.?|°)$/.test(pw));
+    const isDate=/^(DATA|DATADOC)$/.test(t)&&!/^(INIZIO|RITIRO|CONSEGNA|SCADENZA|NASCITA)/.test(pw)&&!/^(INIZIO|RITIRO|CONSEGNA|SCAD)/.test(nw)||(/^(DOC)$/.test(t)&&pw==="DATA");
     if(!isNum&&!isDate||!k.bbox)continue;
     const h=Math.max(4,k.bbox.y1-k.bbox.y0);let best=null,bd=1e9;
     for(const w of ws){
