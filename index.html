@@ -944,22 +944,48 @@ async function addDocFiles(files){
 }
 async function readDoc(blob){
   const st=$("#docSt");if(!st)return;
-  st.className="ocr-status";st.innerHTML=`<span class="spin"></span><span id="docTxt">Leggo il documento…</span>`;
+  const token={};S.docRun=token;
+  st.className="ocr-status";st.innerHTML=`<span class="spin"></span><span id="docTxt" style="flex:1">Leggo il documento…</span><button type="button" class="btn ghost" style="min-height:0;padding:2px 6px;font-size:12.5px" data-action="doc-stop">Basta così</button>`;
+  const alive=()=>$("#docSt")&&S.docRun===token&&S.sheet?.type==="docform";
+  const prog=l=>p=>{const t=$("#docTxt");if(t&&S.docRun===token)t.textContent=`${l}… ${Math.round(p*100)}%`;};
   try{
-    const res=await ocr(blob,p=>{const t=$("#docTxt");if(t)t.textContent=`Leggo il documento… ${Math.round(p*100)}%`;});
-    if(!$("#docSt"))return;
-    const text=res.text,r=parseDDT(text),got=[];
-    if(/FATTURA/i.test(text)&&!/D\.?D\.?T|TRASPORTO/i.test(text)){S.dform.type="Fattura";renderTypePick();}
+    let text="",r=parseDDT(""),fattura=false;
+    const TILES=[];for(let ry=0;ry<3;ry++)for(let cx=0;cx<2;cx++){const tw=.5*1.35,th=1/3*1.6;const x0=Math.max(0,cx*.5-tw*.15),y0=Math.max(0,ry/3-th*.2);TILES.push([x0,y0,Math.min(1,x0+tw),Math.min(1,y0+th)]);}
+    const plan=[["Leggo il documento","std",0],["Guardo meglio","adapt6",0],["Leggo il testo sparso","adapt",0],
+      ["Provo a girare il foglio","adapt6",90],["Provo a girare il foglio","adapt6",270],
+      ...TILES.map((t,i)=>[`Cerco nei dettagli ${i+1}/${TILES.length}`,"tile",0,t])];
+    let rotated=0;
+    for(const [label,mode,rot,crop] of plan){
+      if(!alive()||S.docStop===token)break;
+      const have=(r.number?1:0)+(r.date?1:0)+(r.supplier?1:0);
+      const strong=r.nums[0]&&r.nums[0].s>=9&&r.dates[0]&&r.dates[0].s>=10&&r.supplier;
+      if(strong)break;
+      if(rot&&have>=2)continue;
+      if(crop&&r.number&&r.nums[0].s>=9&&r.supplier&&r.date)break;
+      const res=await ocr(blob,prog(label),mode,rot||rotated,crop);
+      if(!alive())return;
+      let extra=pairDocWords(res.words).concat(partyLines(res.lines));
+      if(mode!=="std"&&(!r.number||r.nums[0].s<9||r.number.replace(/\D/g,"").length<4)){try{const gray=await prepImg(blob,"std",rot||rotated,crop);extra=extra.concat(await refineDocNumber(res.canvas,res.words,gray));}catch(e){if(!tessWorker)throw e;}}
+      text+="\n\f\n"+res.text+"\n"+extra.join("\n");
+      if(rot){const rr=parseDDT(text);if((rr.number?1:0)+(rr.supplier?1:0)>(r.number?1:0)+(r.supplier?1:0))rotated=rot;}
+      if(/FATTURA/i.test(res.text)&&!/D\.?\s?D\.?\s?T|TRASPORTO|BOLLA/i.test(res.text))fattura=true;
+      r=parseDDT(text);
+    }
+    try{window.__kigenDocText=text;}catch(e){}
+    if(!alive())return;
+    const got=[];
+    if(fattura&&/FATTURA/.test(text.toUpperCase())){S.dform.type="Fattura";renderTypePick();}
     const fill=(sel,v)=>{const el=$(sel);if(!el||el.value.trim())return false;el.value=v;el.classList.add("filled");return true;};
-    if(r.supplier){const known=[...new Set(Object.values(S.docs).map(x=>x.supplier).filter(Boolean))].find(k=>r.supplier.toLowerCase().includes(k.toLowerCase()));if(fill("#dSup",known||r.supplier))got.push("fornitore");}
+    if(r.supplier){const known=[...new Set(Object.values(S.docs).map(x=>x.supplier).filter(Boolean))];const k=known.find(k=>nameSim(k,r.supplier)>=0.75||r.supplier.toLowerCase().includes(k.toLowerCase()));if(fill("#dSup",k||r.supplier))got.push("fornitore");}
     if(r.number&&fill("#dNum",r.number))got.push("numero");
     if(r.date){setDate("dDate",r.date);$("#dDate").classList.add("filled");got.push("data");}
     const s=$("#docSt");s.className="ocr-status "+(got.length?"ok":"err");
     s.innerHTML=`<span class="ms">${got.length?"check_circle":"info"}</span><span>${got.length?"Letti: "+got.join(", ")+". Controlla prima di salvare.":"Non sono riuscito a leggere i dati: tocca qui sotto o compila a mano."}</span>`;
-    const chipsD=r.dates.map(d=>`<button type="button" class="cand" data-action="dcand" data-f="date" data-v="${d.iso}">${fmt(d.iso)}</button>`).join("");
+    const chipsS=(r.sups||[]).map(v=>`<button type="button" class="cand" data-action="dcand" data-f="sup" data-v="${esc(v)}">${esc(v)}</button>`).join("");
     const chipsN=r.nums.map(n=>`<button type="button" class="cand mono" data-action="dcand" data-f="num" data-v="${esc(n.v)}">${esc(n.v)}</button>`).join("");
-    const pk=$("#docPick");if(pk)pk.innerHTML=(chipsD&&r.dates.length>1?`<div class="cands"><span class="cl">Data</span>${chipsD}</div>`:"")+(chipsN&&r.nums.length>1?`<div class="cands"><span class="cl">Numero</span>${chipsN}</div>`:"");
-  }catch(e){const s=$("#docSt");if(s){s.className="ocr-status err";s.innerHTML=`<span class="ms">wifi_off</span><span>Lettura non riuscita: compila a mano (la prima volta serve internet).</span>`;}}
+    const chipsD=r.dates.filter(d=>d.s>-6).map(d=>`<button type="button" class="cand" data-action="dcand" data-f="date" data-v="${d.iso}">${fmt(d.iso)}</button>`).join("");
+    const pk=$("#docPick");if(pk)pk.innerHTML=(chipsS&&(r.sups||[]).length>1?`<div class="cands"><span class="cl">Fornitore</span>${chipsS}</div>`:"")+(chipsN&&r.nums.length>1?`<div class="cands"><span class="cl">Numero</span>${chipsN}</div>`:"")+(chipsD&&r.dates.length>1?`<div class="cands"><span class="cl">Data</span>${chipsD}</div>`:"");
+  }catch(e){const s=$("#docSt");if(s&&S.docRun===token){s.className="ocr-status err";s.innerHTML=`<span class="ms">wifi_off</span><span>Lettura non riuscita: compila a mano (la prima volta serve internet).</span>`;}}
 }
 async function saveDoc(btn){
   if(guardRO()||S.saving)return;
@@ -1308,7 +1334,7 @@ async function ocr(blob,onProg,mode,rot,crop){
     await tessSet(psm,"");
   }
   extra+="\n"+pairWords(words).join("\n");
-  return{text:(d.text||"")+extra,words,lines,mode:mode||"std"};
+  return{text:(d.text||"")+extra,words,lines,mode:mode||"std",canvas:c};
 }
 /* labels in columns: take the value to the right of, or under, "Lotto" / "entro" */
 function pairWords(ws){
@@ -1341,11 +1367,12 @@ function pairWords(ws){
 }
 const MON={GEN:1,JAN:1,FEB:2,MAR:3,APR:4,MAG:5,MAY:5,GIU:6,JUN:6,LUG:7,JUL:7,AGO:8,AUG:8,SET:9,SEP:9,OTT:10,OCT:10,NOV:11,DIC:12,DEC:12};
 /* OCR confuses look-alike characters: fix them only inside date-like groups (digits separated by / . -) */
-function fixDigits(s){return s.replace(/[OoQDU]/g,"0").replace(/[Il|!\]\[]/g,"1").replace(/[Ss$]/g,"5").replace(/B/g,"8").replace(/Z/g,"2").replace(/G/g,"6").replace(/T/g,"7");}
+function fixDigits(s){return s.replace(/%/g,"1").replace(/[OoQDU]/g,"0").replace(/[Il|!\]\[]/g,"1").replace(/[Ss$]/g,"5").replace(/B/g,"8").replace(/Z/g,"2").replace(/G/g,"6").replace(/T/g,"7");}
 function normText(raw){
   let t=String(raw||"").replace(/\r/g,"").replace(/[‘’`´]/g,"'").replace(/[—–]/g,"-");
-  t=t.replace(/(?<![A-Za-z0-9])[0-9OoQDUIl|!SsBZGT$\]\[]{1,4}(?:\s?[\/.\-,]\s?[0-9OoQDUIl|!SsBZGT$\]\[]{1,4}){1,2}(?![A-Za-z0-9])/g,m=>{
+  t=t.replace(/(?<![A-Za-z0-9])[0-9OoQDUIl|!SsBZGT$%\]\[]{1,4}(?:\s?[\/.\-,]\s?[0-9OoQDUIl|!SsBZGT$%\]\[]{1,4}){1,2}(?![A-Za-z0-9])/g,m=>{
     const parts=m.split(/\s?[\/.\-,]\s?/);if(parts.length===2&&!parts.some(x=>x.length===4))return m;
+    if(parts.some(x=>x.length&&!/\d/.test(x)))return m;
     const core=m.replace(/[\s\/.\-,]/g,""),dig=(core.match(/\d/g)||[]).length;
     return dig>=Math.ceil(core.length*0.6)?fixDigits(m).replace(/,/g,"."):m;});
   return t;
@@ -1449,24 +1476,149 @@ function parseLabel(text,prevLots){
   return{prodOnly:!best&&dates.length?dates[0].iso:null,lot:lotBest?lotBest.v:null,expiry:best?best.iso:null,monthOnly:best?best.mOnly:false,strong:!!(best&&best.kind==="scadenza"&&best.s>=4),
     dates:dates.slice(0,4),lots:lots.filter(l=>l.s>=2).slice(0,4),tokens:tokens.slice(0,24)};
 }
+const RECIPKW=/(DESTINAT|SPETT|LUOGO DI DESTINAZ|DESTINAZIONE|CLIENTE|CONSEGNA A|INTESTAT)/;
+const SENDERKW=/(MITTENTE|CEDENTE|FORNITORE|VENDITORE|EMITTENTE)/;
+const COSUFFIX=/\b(S\.?\s?R\.?\s?L\.?S?|S\.?\s?P\.?\s?A\.?|S\.?\s?N\.?\s?C\.?|S\.?\s?A\.?\s?S\.?|LTD|GMBH|SOC\.?\s?COOP|S\.?\s?C\.?\s?A\.?\s?R\.?\s?L)\b/;
+function cleanSupplier(s){
+  let t=String(s||"").replace(/\s{2,}/g," ").trim();
+  t=t.replace(/^(MITTENTE|CEDENTE|FORNITORE|DITTA)\s*[:.\-]?\s*/i,"");
+  t=t.split(/\s[-–—|]\s|,|\s(?:VIA|VIALE|CORSO|PIAZZA|P\.?ZZA|STRADA|LOC\.?|P\.?\s?IVA|C\.?F\.?|TEL)\b/i)[0].trim();
+  const m=t.toUpperCase().match(COSUFFIX);if(m)t=t.slice(0,m.index+m[0].length);
+  t=t.replace(/^(?:[a-zà-ÿ]{1,4}\s+|[^A-Za-zÀ-ÿ0-9]+\s*)+(?=[A-Z0-9])/,"");
+  return t.replace(/[^A-Za-zÀ-ÿ0-9.&' ]+$/,"").trim().slice(0,60);
+}
 function parseDDT(text){
   const T=normText(text).toUpperCase();
-  const nums=[];const addN=(v,s)=>{v=cleanLot(v);if((v.match(/\d/g)||[]).length>=v.length/2)v=fixDigits(v);if(!v||v.length>16)return;const e=nums.find(x=>x.v===v);if(e){e.s=Math.max(e.s,s);return;}nums.push({v,s});};
+  const segs=T.split("\f");
+  const nums=[];const addN=(v,s,ctx)=>{v=cleanLot(String(v).replace(/[.]+$/,""));if(!v||v.length>16||!/\d/.test(v))return;
+    {const mm=v.match(/^([A-Z]{1,4}[\/\-])(.*)$/);if(mm){if((mm[2].match(/\d/g)||[]).length>=mm[2].length/2)v=mm[1]+fixDigits(mm[2]);}else if((v.match(/\d/g)||[]).length>=v.length/2&&!/[A-Z]{2}/.test(v))v=fixDigits(v);}
+    if(findDates(v).length&&/[\/.\-]/.test(v))return;
+    if(/^\d{11}$/.test(v.replace(/\D/g,""))&&v.replace(/\D/g,"").length===v.length)s-=10;
+    if(ctx&&/(ORDINE|ORD\.|RIF\.?|CLIENTE|COD\.?|P\.?\s?IVA|TEL|FAX|REA|CAP|CF|COLLI|PAG)\W*$/.test(ctx))s-=8;
+    const e=nums.find(x=>x.v===v);if(e){e.s=Math.max(e.s,s);return;}nums.push({v,s});};
   let m;
-  const g1=/(?:D\.?D\.?T\.?|DOCUMENTO DI TRASPORTO|BOLLA|DOC\.?)[^\n]{0,30}?N(?:UM(?:ERO)?|R)?\s*[°.ºO]?\s*[:.]?\s*([A-Z]{0,3}[\-\/]?\d[\dA-Z\/\-]{0,14})/g;while((m=g1.exec(T)))addN(m[1],10);
-  const g2=/\bN(?:UMERO|R|\.|°|º)\s*[:.]?\s*(\d[\dA-Z\/\-]{0,14})/g;while((m=g2.exec(T)))addN(m[1],5);
+  const NUMV="([A-Z]{0,4}[\\-\\/]?\\d[\\dA-Z\\/\\-.]{0,15})";
+  const g1=new RegExp("(?:D\\.?\\s?D\\.?\\s?T\\.?|DOCUMENTO DI TRASPORTO|DOC(?:UMENTO)?\\.?\\s?DI\\s?TRASP\\w*|BOLLA(?: DI CONSEGNA)?|FATTURA(?: ACCOMPAGNATORIA)?|DOC\\.)[^\\n]{0,30}?N(?:UM(?:ERO)?|R|O)?\\s*[°.ºO]?\\s*[:.]?\\s*"+NUMV,"g");
+  while((m=g1.exec(T)))addN(m[1],10,T.slice(Math.max(0,m.index-15),m.index));
+  const g2=new RegExp("(?:\\bN(?:UMERO|R|\\.|°|º)|NUMERO DOC\\w*)\\s*[:.]?\\s*"+NUMV,"g");
+  while((m=g2.exec(T)))addN(m[1],/NUMERO DOC/.test(m[0])?9:5,T.slice(Math.max(0,m.index-15),m.index));
+  const allRefs=(T.match(/NUMERO DOC [^\n]+/g)||[]).map(x=>cleanLot(x.slice(11)));
+  for(const n of nums){const c=n.v;n.votes=segs.length>1?Math.max(1,segs.filter(sg=>sg.replace(/\s/g,"").includes(c)).length):1;n.votes+=allRefs.filter(x=>x===c).length;n.s+=Math.min(6,(n.votes-1)*2);}
+  for(const n of nums)for(const o of nums){if(o===n)continue;if(n.v.length>o.v.length&&n.v.startsWith(o.v)&&o.v.length>=3){n.s=Math.max(n.s,o.s)+1;o.s-=2;}}
   nums.sort((a,b)=>b.s-a.s);
-  const ds=findDates(T),ny=new Date().getFullYear();
-  const dates=[];
-  for(const d of ds){let isoD=d.iso;if(d.y2&&Math.abs(+isoD.slice(0,4)-ny)>1){let f=ny+isoD.slice(4);if(daysLeft(f)>7)f=(ny-1)+isoD.slice(4);if(parseISO(f))isoD=f;}
-    const before=T.slice(Math.max(0,d.idx-30),d.idx);let s=/DATA|DEL\b|DATE/.test(before)?10:0;const n=daysLeft(isoD);if(n<=7&&n>-120)s+=4;if(EXPKW.test(before))s-=6;
-    const e=dates.find(x=>x.iso===isoD);if(e){e.s=Math.max(e.s,s);continue;}dates.push({iso:isoD,s});}
+  const ny=new Date().getFullYear(),dates=[];
+  for(const sg of segs)for(const d of findDates(sg)){
+    let isoD=d.iso;if(d.y2&&Math.abs(+isoD.slice(0,4)-ny)>1){let f=ny+isoD.slice(4);if(daysLeft(f)>7)f=(ny-1)+isoD.slice(4);if(parseISO(f))isoD=f;}
+    const before=sg.slice(Math.max(0,d.idx-34),d.idx);
+    let s=0;
+    if(/(DATA DOC|DATA|\bDEL\b|\bDATE\b)\W*$/.test(before)||/(DATA|\bDEL\b)[^\n]{0,14}$/.test(before))s+=10;
+    if(/(TRASPORTO|RITIRO|ORDINE|ORD\.|SCAD|PAGAMENTO|RICEVUT|CONSEGNA PREVISTA|NASCITA)[^\n]{0,20}$/.test(before))s-=6;
+    const n=daysLeft(isoD);if(n>7)s-=12;else if(n>=-120)s+=4;else if(n<-365)s-=6;
+    const e=dates.find(x=>x.iso===isoD);if(e){e.votes++;e.s=Math.max(e.s,s);continue;}dates.push({iso:isoD,s,votes:1});
+  }
+  for(const d of dates)d.s+=Math.min(4,(d.votes-1)*2);
   dates.sort((a,b)=>b.s-a.s);
-  let supplier=null;
-  const lines=String(text).split(/\n/).map(s=>s.trim()).filter(s=>/[A-Za-z]{3}/.test(s));
-  const co=lines.find(l=>/\b(S\.?R\.?L|S\.?P\.?A|S\.?N\.?C|S\.?A\.?S|LTD|GMBH|SRLS)\b/i.test(l)&&!/DESTINAT|SPETT|LUOGO|CLIENTE/i.test(l));
-  if(co)supplier=co.replace(/\s{2,}/g," ").slice(0,60);
-  return{number:nums[0]?nums[0].v:null,date:dates[0]?dates[0].iso:null,supplier,nums:nums.slice(0,3),dates:dates.slice(0,3)};
+  // supplier
+  const lines=String(text).split(/\n/).map(s=>s.indexOf("\f")>=0?"\f":s.trim()).filter(Boolean);
+  const sup=[];let recipUntil=-1,senderNext=-1,idx=0;
+  const recips=new Set(knownRecipients());
+  for(const L of lines){const U=L.toUpperCase();if(/^DESTINATARIO:/.test(U)||(RECIPKW.test(U)&&COSUFFIX.test(U))){const v=cleanSupplier(L.replace(/^.*?(DESTINATARIO|DESTINAZIONE[^:]*|SPETT\.?\s?LE|CLIENTE|LUOGO DI DESTINAZIONE)\s*[:.]?\s*/i,""));if(v.length>=4)recips.add(v);}}
+  for(let i=0;i<lines.length;i++){
+    const L=lines[i],U=L.toUpperCase();
+    if(L==="\f"){idx=0;recipUntil=-1;senderNext=-1;continue;}idx++;
+    if(RECIPKW.test(U)){recipUntil=i+2;if(!COSUFFIX.test(U))continue;}
+    if(SENDERKW.test(U)){senderNext=i+2;const rest=cleanSupplier(L);if(COSUFFIX.test(rest.toUpperCase())||rest.length>4&&!SENDERKW.test(rest.toUpperCase()))sup.push({v:rest,s:12-idx*0.1});continue;}
+    if(!/[A-Za-z]{3}/.test(L)||/^(VIA|VIALE|CORSO|P\.?\s?IVA|TEL)/i.test(L))continue;
+    if(COSUFFIX.test(U)){
+      let s=6;if(i<=recipUntil||RECIPKW.test(U))s-=12;if(i<=senderNext)s+=8;if(idx<=6)s+=3;
+      const v=cleanSupplier(L);if(v.length>=3)sup.push({v,s:s-idx*0.05});
+    }
+  }
+  const isRecip=v=>[...recips].some(r=>nameSim(r,v)>=0.75||v.toUpperCase().includes(r.toUpperCase())||r.toUpperCase().includes(v.toUpperCase())&&v.length>=8);
+  for(const x of sup)if(isRecip(x.v))x.s-=30;
+  // merge near-duplicates (same company read slightly differently): keep best score, add votes
+  const merged=[];for(const x of sup.sort((a,b)=>b.s-a.s)){const e=merged.find(m=>nameSim(m.v,x.v)>=0.8);if(e){e.s+=1;continue;}merged.push({...x});}
+  sup.length=0;sup.push(...merged.sort((a,b)=>b.s-a.s));
+  const best=sup.find(x=>x.s>0)||null;
+  try{if(recips.size)rememberRecipients([...recips]);}catch(e){}
+  return{number:nums[0]&&nums[0].s>0?nums[0].v:null,date:dates[0]&&dates[0].s>-6?dates[0].iso:null,supplier:best?best.v:null,nums:nums.filter(x=>x.s>0).slice(0,3),dates:dates.slice(0,3),sups:sup.filter(x=>x.s>0).slice(0,3).map(x=>x.v)};
+}
+function knownRecipients(){try{return JSON.parse(localStorage.getItem("kigen-recipients")||"[]");}catch(e){return[];}}
+function rememberRecipients(list){const cur=knownRecipients();for(const v of list)if(!cur.some(c=>nameSim(c,v)>=0.8))cur.push(v);try{localStorage.setItem("kigen-recipients",JSON.stringify(cur.slice(-10)));}catch(e){}}
+/* split each OCR line into column segments by large gaps */
+function lineSegments(lines){
+  const out=[];const med=a=>{const s=[...a].sort((x,y)=>x-y);return s.length?s[Math.floor(s.length/2)]:0;};
+  for(const l of lines||[]){const ws=(l.words||[]).filter(w=>w.bbox&&String(w.text).trim()).sort((a,b)=>a.bbox.x0-b.bbox.x0);if(!ws.length)continue;
+    const mh=med(ws.map(w=>w.bbox.y1-w.bbox.y0))||10;let cur=[];
+    const flush=()=>{if(!cur.length)return;out.push({t:cur.map(w=>w.text).join(" "),x0:cur[0].bbox.x0,x1:cur[cur.length-1].bbox.x1,y0:Math.min(...cur.map(w=>w.bbox.y0)),y1:Math.max(...cur.map(w=>w.bbox.y1)),h:mh,words:cur});cur=[];};
+    for(const w of ws){if(cur.length&&w.bbox.x0-cur[cur.length-1].bbox.x1>mh*2.2)flush();cur.push(w);}flush();}
+  return out;
+}
+/* sender / recipient blocks by position: company name under "Mittente" vs under "Spett.le" */
+function partyLines(lines){
+  const segs=lineSegments(lines),out=[];
+  for(const s of segs){
+    const U=s.t.toUpperCase();if(!COSUFFIX.test(U))continue;
+    if(SENDERKW.test(U)||RECIPKW.test(U)){out.push((SENDERKW.test(U)&&!RECIPKW.test(U)?"MITTENTE: ":"DESTINATARIO: ")+s.t.replace(/^.*?:\s*/,""));continue;}
+    let best=null,bd=1e9;
+    for(const k of segs){const KU=k.t.toUpperCase();const isS=SENDERKW.test(KU),isR=RECIPKW.test(KU);if(!isS&&!isR||k===s)continue;
+      if(k.y1>s.y0+s.h*0.3||s.y0-k.y1>s.h*3.5)continue;if(k.x1<s.x0-s.h||k.x0>s.x1)continue;
+      const d=s.y0-k.y1;if(d<bd){bd=d;best={isS,isR};}}
+    if(best)out.push((best.isS&&!best.isR?"MITTENTE: ":"DESTINATARIO: ")+s.t);
+  }
+  return out;
+}
+/* re-read the area right of "N." / under "Numero" when the document number is unclear */
+async function refineDocNumber(c,words,gray){
+  const out=[];
+  for(let i=0;i<words.length;i++){
+    const k=words[i];if(!k.bbox)continue;const t=String(k.text).toUpperCase().replace(/[^A-Z°.]/g,"");
+    const prev=words.slice(Math.max(0,i-4),i).map(w=>String(w.text).toUpperCase()).join(" ");
+    const isN=(/^(N|N\.|N°|NR|NR\.|NUM|NUMERO)$/.test(t)&&/(TRASPORTO|D\.?D\.?T|BOLLA|DOC|FATTURA)/.test(prev))||/^(D\.?D\.?T\.?)$/.test(t);
+    const isHead=/^NUMERO$/.test(t);
+    if(!isN&&!isHead)continue;
+    const hh=Math.max(6,k.bbox.y1-k.bbox.y0);
+    const regs=[];
+    if(isN)regs.push([k.bbox.x1,k.bbox.y0-hh*0.4,k.bbox.x1+hh*9,k.bbox.y1+hh*0.4]);
+    if(isHead)regs.push([k.bbox.x0-hh*0.5,k.bbox.y1,k.bbox.x0+hh*7,k.bbox.y1+hh*2.4]);
+    for(const [x0,y0,x1,y1] of regs){
+      const X0=Math.max(0,x0),Y0=Math.max(0,y0),X1=Math.min(c.width,x1),Y1=Math.min(c.height,y1);if(X1-X0<10||Y1-Y0<6)continue;
+      const s=Math.min(4,Math.max(1,90/hh));
+      for(const src of [c,gray].filter(Boolean)){
+        const k2=src.width/c.width;
+        const cc=document.createElement("canvas");cc.width=Math.round((X1-X0)*s);cc.height=Math.round((Y1-Y0)*s);
+        const cx=cc.getContext("2d");cx.fillStyle="#fff";cx.fillRect(0,0,cc.width,cc.height);cx.imageSmoothingQuality="high";
+        cx.drawImage(src,X0*k2,Y0*k2,(X1-X0)*k2,(Y1-Y0)*k2,0,0,cc.width,cc.height);
+        await tessSet("7","0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ/-.°");
+        const d=await recog(cc);const v=String(d.text||"").trim().split(/\s+/).find(x=>/\d/.test(x));
+        if(v)out.push("NUMERO DOC "+v.replace(/^[°.]+/,""));
+      }
+    }
+    if(out.length>=3)break;
+  }
+  await tessSet("11","");tessPsm="";
+  return out;
+}
+/* column headers in DDT boxes: "Numero" / "Data" with the value underneath */
+function pairDocWords(ws){
+  const out=[];
+  for(const k of ws){
+    const t=String(k.text).toUpperCase().replace(/[^A-Z]/g,"");
+    const isNum=/^(NUMERO|NUM|NR|NUMDOC)$/.test(t),isDate=/^(DATA|DATADOC)$/.test(t);
+    if(!isNum&&!isDate||!k.bbox)continue;
+    const h=Math.max(4,k.bbox.y1-k.bbox.y0);let best=null,bd=1e9;
+    for(const w of ws){
+      if(w===k||!w.bbox||!/\d/.test(w.text))continue;
+      const v=w.text;if(isDate&&!findDates(normText(v)).length)continue;
+      const below=w.bbox.y0>=k.bbox.y1-h*0.3&&w.bbox.y0-k.bbox.y1<h*2.5&&w.bbox.x0<k.bbox.x1+h*2&&w.bbox.x1>k.bbox.x0-h*0.5;
+      const right=Math.abs((w.bbox.y0+w.bbox.y1)/2-(k.bbox.y0+k.bbox.y1)/2)<h*0.7&&w.bbox.x0>=k.bbox.x1-h*0.3&&w.bbox.x0-k.bbox.x1<h*6;
+      if(!below&&!right)continue;
+      const d=right?(w.bbox.x0-k.bbox.x1):(1000+(w.bbox.y0-k.bbox.y1)*3+Math.abs(w.bbox.x0-k.bbox.x0));
+      if(d<bd){bd=d;best=w;}
+    }
+    if(best)out.push((isNum?"NUMERO DOC ":"DATA DOC ")+best.text);
+  }
+  return out;
 }
 function wordConf(words,v){
   if(!words||!v)return 100;const V=v.replace(/[^A-Z0-9]/gi,"").toUpperCase();if(!V)return 100;
@@ -1599,6 +1751,7 @@ const A={
     if(!list.length){toast("Serve almeno una categoria");return;}
     try{await api.setSettings({...settings(),threshold:TH(),categories:list});toast("Categorie salvate");}catch(e){}},
   export(){exportCSV();},
+  "doc-stop"(){S.docStop=S.docRun;const t=$("#docTxt");if(t)t.textContent="Mi fermo dopo questo passaggio…";},
   "ocr-stop"(){S.ocrStop=S.ocrRun;const t=$("#ocrTxt");if(t)t.textContent="Mi fermo dopo questo passaggio…";},
   cand(el){
     let f=el.dataset.f,v=el.dataset.v;
@@ -1608,7 +1761,7 @@ const A={
     else{const l=$("#fLot");l.value=v;l.dataset.touched="1";l.classList.remove("check","bad");l.classList.add("filled");}
     renderOcrPick();
   },
-  dcand(el){if(el.dataset.f==="date"){setDate("dDate",el.dataset.v);$("#dDate").classList.add("filled");}else{const n=$("#dNum");n.value=el.dataset.v;n.classList.add("filled");}
+  dcand(el){if(el.dataset.f==="date"){setDate("dDate",el.dataset.v);$("#dDate").classList.add("filled");}else if(el.dataset.f==="sup"){const n=$("#dSup");n.value=el.dataset.v;n.classList.add("filled");}else{const n=$("#dNum");n.value=el.dataset.v;n.classList.add("filled");}
     el.parentNode.querySelectorAll(".cand").forEach(b=>b.classList.toggle("on",b===el));},
   "cal-export"(){exportCal(false,false);},
   "cal-all"(){exportCal(true,false);},
