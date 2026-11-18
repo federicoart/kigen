@@ -902,7 +902,7 @@ function viewArchive(){
 function archBody(crumbs){
   const A=S.arch,q=A.q.trim().toLowerCase();
   if(q){
-    const res=sortDocs(Object.entries(S.docs).filter(([,d])=>[d.supplier,d.number,d.note,d.type,...(d.items||[]).flatMap(it=>[it.desc,it.code,it.lot]),...Object.values(d.extra||{})].some(x=>String(x||"").toLowerCase().includes(q))));
+    const res=sortDocs(Object.entries(S.docs).filter(([,d])=>[d.supplier,d.number,d.note,d.type,...(d.items||[]).flatMap(it=>[it.desc,it.code,it.lot]),...Object.values(d.extra||{}),d.fullText].some(x=>String(x||"").toLowerCase().includes(q))));
     return res.length?`<div class="sec-title">Risultati<small>${res.length}</small></div><div class="list">${res.map(([id,d])=>docRow(id,d,true)).join("")}</div>`:`<div class="empty"><h3>Nessun documento trovato</h3><p>Prova con il nome del fornitore o il numero.</p></div>`;
   }
   crumbs=crumbs||[[null,"Archivio"],...folderPath(A.folder).map(([id,f])=>[id,f.name])];
@@ -954,6 +954,7 @@ function renderDocForm(editId){
     <div class="field"><label for="dNote">Note <span class="opt">(facoltativo)</span></label><textarea class="inp" id="dNote" placeholder="es. manca un collo, merce in ritardo">${esc(d?d.note:"")}</textarea></div>
     <details class="xsec" id="xsItems"><summary><span class="ms">list_alt</span>Righe articoli<span class="cnt" id="xsItemsN"></span></summary><div class="xbody"><div id="itemsBox"></div><button type="button" class="btn" data-action="add-item"><span class="ms">add</span>Aggiungi riga</button></div></details>
     <details class="xsec" id="xsDel"><summary><span class="ms">local_shipping</span>Consegna<span class="cnt" id="xsDelN"></span></summary><div class="xbody"><div class="xgrid">${xFieldInputs(XDELIVERY,d)}</div></div></details>
+    <details class="xsec" id="xsFull"><summary><span class="ms">article</span>Testo completo letto<span class="cnt" id="xsFullN">${d&&d.fullText?d.fullText.split("\n").length+" righe":""}</span></summary><div class="xbody"><p class="muted" style="font-size:12px;margin:0 0 6px">Tutto quello che si legge nella foto, riga per riga. Puoi correggerlo. Serve anche per la ricerca.</p><textarea class="inp" id="dFull" rows="10" style="font-family:ui-monospace,Menlo,monospace;font-size:12px;line-height:1.45">${esc(d&&d.fullText||"")}</textarea></div></details>
     <details class="xsec" id="xsCom"><summary><span class="ms">receipt</span>Dati commerciali<span class="cnt" id="xsComN"></span></summary><div class="xbody"><div class="xgrid">${xFieldInputs(XCOMMERCIAL,d)}</div></div></details>
     <div class="sh-actions"><button class="btn" data-action="close-sheet">Annulla</button><button class="btn primary" data-action="save-doc">Salva</button></div>`,{type:"docform",id:editId||null});
   S.dform.items=d&&d.items?JSON.parse(JSON.stringify(d.items)):[];
@@ -1076,7 +1077,9 @@ async function readDoc(blob){
         for(const t of cands){if(t===bestT)continue;const o=t.items.find(x=>(it.code&&x.code&&(key(x.code)===key(it.code)||nameSim(key(x.code),key(it.code))>=0.82))||(!it.code&&it.desc&&x.desc&&nameSim(it.desc,x.desc)>=0.9));if(!o)continue;
           if(o.qty!==null&&o.qty!==undefined)votes[o.qty]=(votes[o.qty]||0)+1;for(const f of ["lot","expiry","um"])if(!it[f]&&o[f])it[f]=o[f];}
         if(it.qty===null){const b=Object.entries(votes).sort((a,b)=>b[1]-a[1])[0];if(b)it.qty=parseQty(b[0]);}}}
-    const xf=extractFields(mergePasses(passes),text);for(const p of fullP()){const f=extractFields(p.lines,p.text);for(const k in f)if(!xf[k])xf[k]=f[k];}
+    const xf=extractFields(mergePasses(passes),text);
+    try{const vl=visualLines(mergePasses(passes));const ft=vl.map(l=>l.words.filter(w=>(w.confidence||0)>=55).map(w=>w.text).join(" ").replace(/\s*\|\s*/g,"  ").replace(/\s{3,}/g,"  ").trim()).filter(t=>t.replace(/[^A-Za-zÀ-ÿ0-9]/g,"").length>=2).join("\n");
+      const el=$("#dFull");if(el&&!el.value.trim()){el.value=ft;el.classList.add("filled");const ds=$("#xsFull");if(ds)ds.open=false;const n=$("#xsFullN");if(n){n.textContent=ft.split("\n").length+" righe";n.className="cnt ok";}}}catch(e){}for(const p of fullP()){const f=extractFields(p.lines,p.text);for(const k in f)if(!xf[k])xf[k]=f[k];}
     try{window.__kigenDocExtra={items:bestT.items,fields:xf,cols:bestT.cols};}catch(e){}
     try{const mv=visualLines(mergePasses(passes));window.__kigenMV=mv.map(l=>[Math.round(l.bbox.y0),l.words.map(w=>w.text+"@"+Math.round(w.bbox.x0)+"("+Math.round(w.confidence)+")").join(" ")]);}catch(e){}
     try{window.__kigenVL=passes.map(p=>({mode:p.mode,rot:p.rot,skew:skewOf(p.lines),n:(p.lines||[]).length,vl:visualLines(p.lines).map(l=>[Math.round(l.bbox.y0),l.words.map(w=>w.text+"@"+Math.round(w.bbox.x0)).join(" ")])}));}catch(e){}
@@ -1115,7 +1118,7 @@ async function saveDoc(btn){
     }
     let folder=$("#dFolder").value;
     if(folder==="auto")folder=await ensureDateFolders(date);
-    const data={type:F.type,supplier:$("#dSup").value.trim(),number:$("#dNum").value.trim(),date,folderId:folder||null,note:$("#dNote").value.trim(),files,items:collectItems(),extra:collectExtra()};
+    const data={type:F.type,supplier:$("#dSup").value.trim(),number:$("#dNum").value.trim(),date,folderId:folder||null,note:$("#dNote").value.trim(),files,items:collectItems(),extra:collectExtra(),fullText:($("#dFull")?.value||"").trim()};
     if(F.id){await api.update("docs",F.id,data);for(const f of F.removed)await FILES.remove(f);toast("Documento aggiornato");}
     else{data.createdAt=Date.now();const nid=await api.add("docs",data);const nl=data.items.filter(it=>it.expiry).length;
       toast(`Archiviato in ${pathText(folder||null)}`,nl?{label:`Carica ${nl} in inventario`,fn:()=>renderLoadSheet(nid)}:null);}
@@ -1147,7 +1150,7 @@ function docItemsView(id,d){
 }
 function docExtraView(d){
   const x=d.extra||{};const sec=(keys,title,icon)=>{const ks=keys.filter(k=>x[k]);if(!ks.length)return"";return`<details class="xsec" open><summary><span class="ms">${icon}</span>${title}<span class="cnt ok">${ks.length}</span></summary><div class="xbody"><dl class="meta" style="margin:0">${ks.map(k=>`<dt>${esc(XLABEL[k])}</dt><dd>${esc(x[k])}</dd>`).join("")}</dl></div></details>`;};
-  return sec(XDELIVERY,"Consegna","local_shipping")+sec(XCOMMERCIAL,"Dati commerciali","receipt");
+  return sec(XDELIVERY,"Consegna","local_shipping")+sec(XCOMMERCIAL,"Dati commerciali","receipt")+(d.fullText?`<details class="xsec"><summary><span class="ms">article</span>Testo completo letto<span class="cnt ok">${d.fullText.split("\n").length} righe</span></summary><div class="xbody"><pre style="white-space:pre-wrap;font-family:ui-monospace,Menlo,monospace;font-size:12px;line-height:1.45;margin:0">${esc(d.fullText)}</pre></div></details>`:"");
 }
 function titleCase(s){s=String(s||"").toLowerCase().replace(/\s+/g," ").trim();return s.charAt(0).toUpperCase()+s.slice(1);}
 function renderLoadSheet(docId){
@@ -1214,7 +1217,7 @@ function viewSettings(){
     <p>${Object.keys(S.products).length} referenze · ${Object.keys(S.lots).length} lotti · ${Object.keys(S.docs).length} documenti</p>
     <div class="sh-actions"><button class="btn brand" data-action="backup"><span class="ms">backup</span>Backup</button><label class="btn" style="flex:1;justify-content:center;padding:12px;min-height:48px"><span class="ms">settings_backup_restore</span>Ripristina<input type="file" accept="application/json,.json" hidden id="restoreIn"></label></div>
     <button class="btn ghost" style="margin-top:6px" data-action="export"><span class="ms">table</span>Esporta inventario (CSV)</button></div>
-  <p class="muted" style="text-align:center;font-size:12px;margin-top:10px">Versione 11</p>`;
+  <p class="muted" style="text-align:center;font-size:12px;margin-top:10px">Versione 12</p>`;
 }
 function catRow(c){const n=Object.values(S.products).filter(p=>p.category===c.id).length;
   return`<div class="cat-row" data-id="${esc(c.id)}"><input class="inp k" maxlength="2" value="${esc(c.kanji||"")}" aria-label="Simbolo"><input class="inp n" value="${esc(c.name)}" placeholder="Nome categoria" aria-label="Nome"><button class="icon-btn" data-action="del-cat" data-id="${esc(c.id)}" ${n?`disabled title="Contiene ${n} referenze"`:""} aria-label="Elimina"><span class="ms">${n?"lock":"delete"}</span></button></div>`;}
@@ -1937,14 +1940,21 @@ const XFIELDS=[
   ["start","Inizio trasporto",/(INIZIO\s*TRASPORTO|DATA\s*(DI\s*)?INIZIO\s*TRASP\w*|DATA\s*(DEL\s*)?RITIRO|DATA\s*TRASPORTO)/,"datetime"],
   ["packages","Colli",/(N(R|UM|°)?\.?\s*COLLI|\bCOLLI\b)/,"int"],
   ["weight","Peso",/(PESO\s*LORDO|P\.?\s*LORDO)/,"num"],
-  ["weight","Peso",/(PESO\s*LORDO|P\.?\s*LORDO|PESO\s*NETTO|P\.?\s*NETTO|PESO\s*(KG)?)/,"num"],
+  ["netWeight","Peso netto",/(PESO\s*NETTO|P\.?\s*NETTO)/,"num"],
+  ["weight","Peso",/(PESO\s*(KG)?)\b/,"num"],
+  ["volume","Volume",/\bVOLUME\b/,"num"],
+  ["appearance","Aspetto dei beni",/ASPETTO\s*(ESTERIORE)?\s*(DEI)?\s*BENI/,"text"],
+  ["port","Porto",/\bPORTO\b|\bRESA\b/,"text"],
   ["reason","Causale",/CAUSALE(\s*(DEL\s*)?TRASPORTO)?/,"text"],
   ["deliveryNote","Note consegna",/(NOTE\s*(DI\s*)?CONSEGNA|ANNOTAZIONI)/,"text"],
   ["customerCode","Codice cliente",/(COD(ICE)?\.?\s*CLIENTE|\bCLIENTE\b)/,"code"],
   ["vat","Partita IVA cliente",/(PARTITA\s*IVA|P\.?\s?IVA|\bIVA\b)/,"vat"],
   ["payment","Pagamento",/(CONDIZION\w*\s*(DI\s*)?PAGAMENTO|MODALIT\w*\s*(DI\s*)?PAGAMENTO|MOD\.?\s*PAG\w*|\bPAGAMENTO\b)/,"text"],
+  ["bank","Banca d'appoggio",/BANCA(\s*D.?\s*APPOGGIO)?|\bIBAN\b/,"text"],
+  ["total","Totale documento",/TOTALE\s*(DOCUMENTO|DDT|MERCE|FATTURA|EURO)|\bTOTALE\b/,"num"],
+  ["supplierVat","Partita IVA fornitore",null,"svat"],
   ["orderRef","Rif. ordine",null,"order"]];
-const XDELIVERY=["recipient","destination","carrier","start","packages","weight","reason","deliveryNote"],XCOMMERCIAL=["customerCode","vat","payment","orderRef"];
+const XDELIVERY=["recipient","destination","carrier","start","packages","weight","netWeight","volume","appearance","port","reason","deliveryNote"],XCOMMERCIAL=["customerCode","vat","supplierVat","payment","bank","total","orderRef"];
 const ANYLABEL=new RegExp(XFIELDS.filter(f=>f[2]).map(f=>f[2].source).join("|")+"|\\b(PAGINA|VALUTA|BANCA|AGENTE|VOLUME|TIPO\\s*SPEDIZIONE|ASPETTO|FIRMA|CODICE\\s*FISCALE|DATA\\s*DOC|N°\\s*DOCUMENTO|PORTO)\\b");
 function cutAtLabel(s){const m=s.slice(1).search(/\s(?=[A-ZÀ-Ü][A-Za-zà-ü.\s]{1,22}:)/);let t=m>=0?s.slice(0,m+1):s;const k=deacc(t).toUpperCase().slice(2).search(ANYLABEL);if(k>=0)t=t.slice(0,k+2);return t.trim();}
 function fixCode(c){let p;do{p=c;c=c.replace(/(\d)S/g,"$15").replace(/(\d)O/g,"$10");}while(c!==p);return c;}
@@ -1991,6 +2001,9 @@ function extractFields(rawLines,text){
       if(v){out[key]=v;break;}
     }
   }
+  {const top=segs.filter(s=>s.y0<H*0.22).map(s=>s.t).join(" ");const ms=[...top.matchAll(/(?<!\d)(\d[\d ]{9,13}\d)(?!\d)/g)].map(m=>m[1].replace(/ /g,"")).filter(d=>d.length===11&&d!==out.vat);
+    if(ms.length)out.supplierVat=ms[0];}
+  if(out.bank&&!/BANC|BPER|CREDIT|IBAN|INTESA|UNICREDIT|POSTE|CASSA|\bIT\s?\d{2}/i.test(deacc(out.bank)))delete out.bank;
   // transport reason with an unread label: a short standalone value like "C / Vendita" in the upper half
   if(!out.reason){const RS=/^(C\s*\/\s*|CAUS\w*\s*)?(VENDITA|TENTATA\s+VENDITA|CONTO\s+VISIONE|C\s*\/\s*VISIONE|RESO|RESO\s+MERCE|OMAGGIO|C\s*\/?\s*LAVORAZIONE|DEPOSITO|TRASFERIMENTO|SOSTITUZIONE)\.?$/;
     for(const s of segs){if(s.y0>H*0.5||s.words.length>5)continue;const U=deacc(s.t).toUpperCase().trim();if(RS.test(U)){out.reason=s.t.trim();break;}}}
