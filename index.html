@@ -497,6 +497,61 @@ details.xsec>summary{font-weight:800}
 .dialog .dbox{border-radius:26px;border:2px solid var(--line);box-shadow:0 5px 0 var(--pop),0 20px 50px rgba(0,0,0,.18)}
 .step .num{background:var(--brand);box-shadow:0 3px 0 var(--brand-d);transform:rotate(-4deg)}
 .empty .big{border-radius:22px;border:2px solid currentColor;transform:rotate(-4deg)}
+/* ===== restraint pass: radius scale, no side stripes, no icon tiles, no glass ===== */
+:root{--r:14px}
+html,body{background-image:radial-gradient(var(--dots) 1px,transparent 1.2px);background-size:24px 24px}
+header{backdrop-filter:none;-webkit-backdrop-filter:none;background:var(--paper)}
+.logo{border-radius:13px}
+.pill{border:0;box-shadow:none;border-radius:6px;padding:4px 8px}
+
+/* corners: 14 for surfaces, 10 for controls, 6 for labels */
+.lot-card,.cat,.list,.card,.plist,.ctile,.step,.hello,.statusbar,.dialog .dbox{border-radius:14px}
+.quick button{border-radius:14px}
+details.xsec,.irow,.lrow,.ocr,.box,.banner{border-radius:12px}
+.btn,.inp,.search,.pick button,.seg,.icon-btn,.sugg,.picked{border-radius:10px}
+.seg button{border-radius:7px}
+.cand{border-radius:8px}
+.chip,.badge,.tag,.doctype{border-radius:5px}
+.sheet{border-radius:18px 18px 0 0}
+.fab{border-radius:14px;height:54px}
+.item .ico{border-radius:10px;transform:none!important}
+.thumbs img,.pending .pp,.pages a.pg{border-radius:8px}
+
+/* status by label, not by a coloured stripe on a rounded card */
+.lot-card::before,.prod::before{display:none}
+.lot-card{padding:13px 14px 11px}
+
+/* counters: one strip, not three pastel boxes */
+.tiles{gap:0;background:var(--card);border:2px solid var(--line);border-radius:14px;box-shadow:var(--shadow);overflow:hidden}
+.tile,.tile.exp,.tile.warn,.tile.req{background:transparent;border:0;border-radius:0;box-shadow:none;padding:12px 6px 10px}
+.tile+.tile{border-left:2px dashed var(--line)}
+.tile .l{color:var(--ink2)}
+.tile.zero{opacity:1}.tile.zero .n,.tile.zero .ms{color:var(--ink3)}
+.tile:active{transform:none;background:var(--paper)}
+
+/* plain icons instead of icons in coloured squares */
+.quick .qi,.quick .qi.p,.quick .qi.d{background:transparent;width:auto;height:auto;transform:none}
+.quick .qi .ms{font-size:26px}
+.empty .big{transform:none;border-radius:12px}
+.step .num{border-radius:9px;transform:none}
+
+/* hanko stays: it is the one deliberate motif. Square like a real stamp */
+.kanji{border-radius:7px}
+.pick button .k{border-radius:5px}
+
+/* docked nav, solid */
+nav{left:0;right:0;bottom:0;border:0;border-top:2px dashed var(--line);border-radius:0;box-shadow:none;padding:4px 8px var(--safe-b);background:var(--card);backdrop-filter:none;-webkit-backdrop-filter:none}
+nav button{border-radius:10px;margin:2px 0}
+.fab{bottom:calc(78px + var(--safe-b))}
+main{padding-bottom:calc(150px + var(--safe-b))}
+.toast{bottom:calc(146px + var(--safe-b));border-radius:12px!important}
+
+.hello::after{display:none}
+.hello svg{transform:none}
+.quick .qi{transform:none}
+.item .ico.folder{background:transparent;border:0}
+.item .ico.folder .ms{font-size:30px}
+.sheet .ocr{background:transparent;border:0;border-bottom:2px dashed var(--line);border-radius:0;padding:0 0 14px}
 </style>
 </head>
 <body>
@@ -793,13 +848,13 @@ function viewInstall(){
 }
 function installCard(){
   if(isStandalone())return"";try{if(localStorage.getItem("kigen-install-hide"))return"";}catch(e){}
-  return`<div class="card" style="display:flex;gap:12px;align-items:flex-start"><span class="kanji c4" style="flex:none"><span class="ms">install_mobile</span></span><div style="flex:1"><b>Installa Kigen sul telefono</b>
+  return`<div class="card" style="display:flex;gap:12px;align-items:flex-start"><span class="ms" style="flex:none;font-size:26px;color:var(--sky)">install_mobile</span><div style="flex:1"><b>Installa Kigen sul telefono</b>
     <p style="margin:4px 0 0">${isIOS()?`In Safari tocca <span class="ms" style="font-size:18px">ios_share</span> Condividi, poi “Aggiungi alla schermata Home”. Così si apre come un’app e i dati restano al sicuro.`:"Dal menu del browser scegli “Installa app” o “Aggiungi a schermata Home”."}</p></div>
     <button class="icon-btn" data-action="hide-install" aria-label="Nascondi"><span class="ms">close</span></button></div>`;
 }
 function calCard(){
   const n=calRows(false).length;if(!n||S.readOnly)return"";
-  return`<div class="card" style="display:flex;gap:12px;align-items:center;margin-top:8px"><span class="kanji c3" style="flex:none"><span class="ms">notifications_active</span></span><div style="flex:1;min-width:0"><b>Attiva ${n} promemori${n===1?"o":"a"}</b><p style="margin:2px 0 0;font-size:12.5px">Un tocco e ti arriva il pop up ${TH()} giorni prima della scadenza.</p></div>
+  return`<div class="card" style="display:flex;gap:12px;align-items:center;margin-top:8px"><span class="ms" style="flex:none;font-size:26px;color:var(--ai)">notifications_active</span><div style="flex:1;min-width:0"><b>Attiva ${n} promemori${n===1?"o":"a"}</b><p style="margin:2px 0 0;font-size:12.5px">Un tocco e ti arriva il pop up ${TH()} giorni prima della scadenza.</p></div>
     <button class="btn brand" data-action="cal-export">Attiva</button></div>`;
 }
 function greet(){const hr=new Date().getHours();return hr<13?"Buongiorno":hr<18?"Buon pomeriggio":"Buonasera";}
@@ -1334,7 +1389,7 @@ function viewSettings(){
     <p>${Object.keys(S.products).length} referenze · ${Object.keys(S.lots).length} lotti · ${Object.keys(S.docs).length} documenti</p>
     <div class="sh-actions"><button class="btn brand" data-action="backup"><span class="ms">backup</span>Backup</button><label class="btn" style="flex:1;justify-content:center;padding:12px;min-height:48px"><span class="ms">settings_backup_restore</span>Ripristina<input type="file" accept="application/json,.json" hidden id="restoreIn"></label></div>
     <button class="btn ghost" style="margin-top:6px" data-action="export"><span class="ms">table</span>Esporta inventario (CSV)</button></div>
-  <p class="muted" style="text-align:center;font-size:12px;margin-top:10px">Versione 13</p>`;
+  <p class="muted" style="text-align:center;font-size:12px;margin-top:10px">Versione 14</p>`;
 }
 function catRow(c){const n=Object.values(S.products).filter(p=>p.category===c.id).length;
   return`<div class="cat-row" data-id="${esc(c.id)}"><input class="inp k" maxlength="2" value="${esc(c.kanji||"")}" aria-label="Simbolo"><input class="inp n" value="${esc(c.name)}" placeholder="Nome categoria" aria-label="Nome"><button class="icon-btn" data-action="del-cat" data-id="${esc(c.id)}" ${n?`disabled title="Contiene ${n} referenze"`:""} aria-label="Elimina"><span class="ms">${n?"lock":"delete"}</span></button></div>`;}
