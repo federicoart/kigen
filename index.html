@@ -380,6 +380,123 @@ details.xsec[open]>summary{border-bottom:1px solid var(--line)}
 .lrow .r3{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px}
 .lrow .inp{min-height:40px;font-size:14.5px;padding:8px 10px}
 .lrow .ex{font-size:12px;color:var(--ai);margin-top:4px}
+/* ===== cozy kawaii theme ===== */
+:root{
+  --brand:#ff8a8f; --brand-d:#e96f76; --brand2:#ffbe8c; --brand-soft:#ffe9e3; --brand-ink:#fff;
+  --paper:#fff6ea; --card:#fffdf8; --ink:#4b3a34; --ink2:#7d675d; --ink3:#b39f92; --line:#f1dfcd; --pop:#ecd5c0;
+  --shu:#ec6175; --shu-d:#d34a5f; --shu-soft:#ffe5e7; --kin:#d28b1f; --kin-d:#c07c12; --kin-soft:#fff0cc;
+  --ai:#8a74db; --ai-d:#7460c6; --ai-soft:#eee9ff; --mint:#4f9a63; --mint-d:#3f8653; --mint-soft:#e2f2da;
+  --sky:#4f93d1; --sky-soft:#e2effb; --r:24px;
+  --shadow:0 3px 0 var(--pop); --dots:#f5e2cd;
+}
+@media (prefers-color-scheme:dark){:root{
+  --brand:#ff9a9e; --brand-d:#d9757b; --brand2:#ffc79c; --brand-soft:#3e2a28; --paper:#221a17; --card:#2c231f; --ink:#f6e9de; --ink2:#d2bfb2; --ink3:#968274; --line:#43352e; --pop:#171210;
+  --shu:#ff8496; --shu-d:#c95c6d; --shu-soft:#46262b; --kin:#f1b75e; --kin-d:#b98736; --kin-soft:#3e311b; --ai:#b4a2ff; --ai-d:#8a78d0; --ai-soft:#2e2843;
+  --mint:#83cf96; --mint-d:#5a9d6c; --mint-soft:#203226; --sky:#8fc0ee; --sky-soft:#1e2b38; --dots:#2b221e;
+}}
+html,body{background-color:var(--paper);background-image:radial-gradient(var(--dots) 1.3px,transparent 1.5px);background-size:22px 22px;background-attachment:fixed}
+body{font-weight:500}
+
+/* header */
+header{background:color-mix(in srgb,var(--paper) 88%,transparent);border-bottom:2px dashed var(--line);padding-bottom:10px}
+.logo{background:linear-gradient(135deg,#ff7aa2,#ffab8a)!important;border-radius:16px;box-shadow:0 3px 0 #e8829a;transform:rotate(-4deg)}
+.wm{font-size:24px;font-weight:800;color:var(--ink)}
+.wm small{font-weight:700;color:var(--ink3)}
+.wm small::before{content:"期限 · ";color:var(--brand)}
+.pill{border:2px solid currentColor;padding:3px 9px;box-shadow:0 2px 0 color-mix(in srgb,currentColor 30%,transparent)}
+.pill.exp{border-color:color-mix(in srgb,var(--shu) 35%,transparent)}
+.pill.warn{border-color:color-mix(in srgb,var(--kin) 35%,transparent)}
+.pill.ok{border-color:color-mix(in srgb,var(--mint) 35%,transparent)}
+
+/* cards: soft stickers */
+.lot-card,.cat,.list,.card,.plist,.quick button,.ctile,.step,details.xsec{background:var(--card);border:2px solid var(--line);box-shadow:var(--shadow)}
+.lot-card{border-radius:22px;padding:13px 13px 11px 18px}
+.lot-card::before{width:6px;top:12px;bottom:12px;left:7px;border-radius:6px}
+.prod,.item,.iline,.lot-line,.cat-add,.sugg button{border-color:var(--line)!important;border-bottom-style:dashed!important}
+.cat-body,details.xsec[open]>summary{border-top-style:dashed;border-bottom-style:dashed}
+.card{border-radius:24px;padding:16px}
+.card h3{font-weight:800}
+.card h3 .ms{color:var(--brand)}
+
+/* buttons: squishy */
+.btn{border:2px solid var(--line);border-radius:18px;font-weight:700;box-shadow:0 3px 0 var(--pop);transition:transform .08s,box-shadow .08s}
+.btn:active,.quick button:active,.ctile:active,.tile:active,.fab:active,.cand:active,.pick button:active{transform:translateY(2px);box-shadow:0 1px 0 var(--pop)}
+.btn.primary,.btn.brand{background:var(--brand);border:2px solid var(--brand);color:#fff;box-shadow:0 4px 0 var(--brand-d)}
+.btn.primary:active,.btn.brand:active{box-shadow:0 1px 0 var(--brand-d)}
+.btn.ghost{box-shadow:none;border-color:transparent}
+.btn.danger{box-shadow:0 3px 0 color-mix(in srgb,var(--shu) 25%,var(--pop))}
+.fab{background:var(--brand);border:2.5px solid #fff;box-shadow:0 5px 0 var(--brand-d),0 10px 24px color-mix(in srgb,var(--brand) 30%,transparent);border-radius:30px;bottom:calc(98px + var(--safe-b));transition:transform .08s,box-shadow .08s}
+@media (prefers-color-scheme:dark){.fab{border-color:var(--card)}}
+.fab:active{box-shadow:0 2px 0 var(--brand-d)}
+
+/* floating nav */
+nav{left:12px;right:12px;bottom:calc(10px + var(--safe-b));padding:6px;border:2px solid var(--line);border-radius:28px;box-shadow:0 4px 0 var(--pop),0 10px 30px rgba(120,80,60,.10);background:color-mix(in srgb,var(--card) 94%,transparent);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
+nav .in{gap:4px}
+nav button{border-radius:22px;padding:7px 0 7px;font-weight:700;color:var(--ink3);transition:background .15s}
+nav button.on{background:var(--brand-soft);color:var(--brand-d)}
+@media (prefers-color-scheme:dark){nav button.on{color:var(--brand)}}
+nav .nb{top:2px;border:2px solid var(--card);line-height:15px}
+main{padding-bottom:calc(170px + var(--safe-b))}
+.toast{bottom:calc(168px + var(--safe-b));border-radius:20px;box-shadow:0 4px 0 rgba(0,0,0,.15)}
+
+/* home */
+.hello{background:var(--brand-soft);border:2px solid color-mix(in srgb,var(--brand) 25%,var(--line));box-shadow:0 3px 0 color-mix(in srgb,var(--brand) 22%,var(--pop));border-radius:26px;position:relative;overflow:hidden}
+.hello::after{content:"";position:absolute;right:14px;top:12px;width:34px;height:20px;background:radial-gradient(circle at 4px 15px,color-mix(in srgb,var(--brand) 55%,transparent) 0 3px,transparent 3.5px),radial-gradient(circle at 18px 5px,color-mix(in srgb,var(--brand2) 80%,transparent) 0 4px,transparent 4.5px),radial-gradient(circle at 30px 16px,color-mix(in srgb,var(--brand) 35%,transparent) 0 2.5px,transparent 3px);pointer-events:none}
+.item .t1,.item .t2{display:block}
+.hello svg{transform:rotate(-6deg)}
+.hello h2{font-size:20px}
+.tile{border:2px solid color-mix(in srgb,currentColor 22%,transparent);border-radius:22px;padding:12px 6px 10px}
+.tile.exp{box-shadow:0 4px 0 color-mix(in srgb,var(--shu) 30%,var(--pop))}
+.tile.warn{box-shadow:0 4px 0 color-mix(in srgb,var(--kin) 30%,var(--pop))}
+.tile.req{box-shadow:0 4px 0 color-mix(in srgb,var(--ai) 30%,var(--pop))}
+.tile .n{font-size:32px}
+.tile.zero{opacity:.6;box-shadow:none}
+.quick button{border-radius:22px}
+.quick .qi{border-radius:14px;transform:rotate(-4deg)}
+.banner{border:2px dashed color-mix(in srgb,var(--ai) 30%,transparent);border-radius:20px}
+
+.sec-title{font-size:15px;font-weight:800;gap:9px}
+.sec-title .dot{width:12px;height:12px;border-radius:5px;transform:rotate(45deg)}
+.chip,.badge,.tag{border-radius:999px;font-weight:800;border:1.5px solid color-mix(in srgb,currentColor 22%,transparent)}
+.chip.ok{border-color:var(--line)}
+
+/* categories: hanko stamp */
+.kanji{border-radius:14px;border:2px solid currentColor;box-shadow:0 2px 0 color-mix(in srgb,currentColor 25%,transparent);transform:rotate(-5deg);font-weight:800}
+.ctile{border-radius:24px;padding:15px;min-height:140px}
+.ctile:nth-child(even) .kanji{transform:rotate(4deg)}
+.ctile b{font-size:16.5px;font-weight:800}
+.ctile.addc{border:2.5px dashed var(--pop);box-shadow:none;background:color-mix(in srgb,var(--card) 50%,transparent)}
+.cat{border-radius:24px}
+.seg{background:var(--card);border:2px solid var(--line);border-radius:20px;padding:4px;box-shadow:var(--shadow)}
+.seg button{border-radius:15px;font-weight:700}
+.seg button.on{background:var(--brand);color:#fff;box-shadow:0 2px 0 var(--brand-d)}
+.search{border:2px solid var(--line);border-radius:22px;box-shadow:var(--shadow);background:var(--card)}
+.search .ms{color:var(--brand)}
+.legend i{border-radius:4px;transform:rotate(45deg);width:8px;height:8px}
+.statusbar{border:2px solid color-mix(in srgb,currentColor 20%,transparent);border-radius:20px}
+.item .ico{border-radius:14px;border:2px solid var(--line)}
+.item .ico.folder{border-color:color-mix(in srgb,var(--brand) 30%,transparent);transform:rotate(-4deg)}
+.doctype{border-radius:999px;padding:0 8px}
+
+/* forms + sheet */
+.sheet{border-radius:30px 30px 0 0;border-top:2px solid var(--line);background:var(--card)}
+.grab{width:46px;height:6px;border-radius:6px;background:var(--pop)}
+.sh-head h2{font-weight:800;font-size:19px}
+.inp{border:2px solid var(--line);border-radius:18px;background:var(--paper)}
+.inp:focus{border-color:var(--brand);box-shadow:0 0 0 4px var(--brand-soft)}
+.inp.filled{border-color:color-mix(in srgb,var(--mint) 55%,var(--line))}
+.field>label,.lbl{font-weight:800;color:var(--ink2)}
+.ocr,.box{background:var(--brand-soft);border:2px dashed color-mix(in srgb,var(--brand) 30%,var(--line));border-radius:22px}
+.pick button{border:2px solid var(--line);border-radius:16px;background:var(--card);font-weight:700;box-shadow:0 3px 0 var(--pop)}
+.pick button .k{display:inline-grid;place-items:center;width:24px;height:24px;border-radius:8px;border:1.5px solid currentColor;font-size:13px;transform:rotate(-5deg)}
+.pick button.on{background:var(--brand);border-color:var(--brand);box-shadow:0 3px 0 var(--brand-d)}
+.cand{border:2px solid var(--line);font-weight:700}
+.irow,.lrow{border:2px solid var(--line);border-radius:18px;background:var(--paper)}
+details.xsec{border-radius:20px}
+details.xsec>summary{font-weight:800}
+.dialog .dbox{border-radius:26px;border:2px solid var(--line);box-shadow:0 5px 0 var(--pop),0 20px 50px rgba(0,0,0,.18)}
+.step .num{background:var(--brand);box-shadow:0 3px 0 var(--brand-d);transform:rotate(-4deg)}
+.empty .big{border-radius:22px;border:2px solid currentColor;transform:rotate(-4deg)}
 </style>
 </head>
 <body>
@@ -1217,7 +1334,7 @@ function viewSettings(){
     <p>${Object.keys(S.products).length} referenze · ${Object.keys(S.lots).length} lotti · ${Object.keys(S.docs).length} documenti</p>
     <div class="sh-actions"><button class="btn brand" data-action="backup"><span class="ms">backup</span>Backup</button><label class="btn" style="flex:1;justify-content:center;padding:12px;min-height:48px"><span class="ms">settings_backup_restore</span>Ripristina<input type="file" accept="application/json,.json" hidden id="restoreIn"></label></div>
     <button class="btn ghost" style="margin-top:6px" data-action="export"><span class="ms">table</span>Esporta inventario (CSV)</button></div>
-  <p class="muted" style="text-align:center;font-size:12px;margin-top:10px">Versione 12</p>`;
+  <p class="muted" style="text-align:center;font-size:12px;margin-top:10px">Versione 13</p>`;
 }
 function catRow(c){const n=Object.values(S.products).filter(p=>p.category===c.id).length;
   return`<div class="cat-row" data-id="${esc(c.id)}"><input class="inp k" maxlength="2" value="${esc(c.kanji||"")}" aria-label="Simbolo"><input class="inp n" value="${esc(c.name)}" placeholder="Nome categoria" aria-label="Nome"><button class="icon-btn" data-action="del-cat" data-id="${esc(c.id)}" ${n?`disabled title="Contiene ${n} referenze"`:""} aria-label="Elimina"><span class="ms">${n?"lock":"delete"}</span></button></div>`;}
