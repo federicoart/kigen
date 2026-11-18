@@ -1082,6 +1082,7 @@ async function readDoc(blob){
     try{window.__kigenVL=passes.map(p=>({mode:p.mode,rot:p.rot,skew:skewOf(p.lines),n:(p.lines||[]).length,vl:visualLines(p.lines).map(l=>[Math.round(l.bbox.y0),l.words.map(w=>w.text+"@"+Math.round(w.bbox.x0)).join(" ")])}));}catch(e){}
     if(bestT.items.length&&!(S.dform.items||[]).length){S.dform.items=bestT.items;renderItemsEditor();const ds=$("#xsItems");if(ds)ds.open=true;}
     for(const k in xf){const el=$("#x_"+k);if(el&&!el.value.trim()){el.value=xf[k];el.classList.add("filled");}}
+    for(const [id,keys] of [["#xsDel",XDELIVERY],["#xsCom",XCOMMERCIAL]]){const ds=$(id);if(ds&&keys.some(k=>xf[k]))ds.open=true;}
     updateXCounts();
     const got=[];
     if(fattura&&/FATTURA/.test(text.toUpperCase())){S.dform.type="Fattura";renderTypePick();}
@@ -1145,7 +1146,7 @@ function docItemsView(id,d){
     ${nl&&!S.readOnly?`<button class="btn brand" style="width:100%;justify-content:center;min-height:48px" data-action="load-doc" data-id="${id}"><span class="ms">inventory</span>${d.loadedAt?"Carica di nuovo":"Carica"} ${nl} in inventario</button>${d.loadedAt?`<p class="note">Già caricati il ${new Date(d.loadedAt).toLocaleDateString("it-IT")}.</p>`:""}`:`<p class="note">Nessuna riga con scadenza: niente da caricare in inventario.</p>`}</div></details>`;
 }
 function docExtraView(d){
-  const x=d.extra||{};const sec=(keys,title,icon)=>{const ks=keys.filter(k=>x[k]);if(!ks.length)return"";return`<details class="xsec"><summary><span class="ms">${icon}</span>${title}<span class="cnt ok">${ks.length}</span></summary><div class="xbody"><dl class="meta" style="margin:0">${ks.map(k=>`<dt>${esc(XLABEL[k])}</dt><dd>${esc(x[k])}</dd>`).join("")}</dl></div></details>`;};
+  const x=d.extra||{};const sec=(keys,title,icon)=>{const ks=keys.filter(k=>x[k]);if(!ks.length)return"";return`<details class="xsec" open><summary><span class="ms">${icon}</span>${title}<span class="cnt ok">${ks.length}</span></summary><div class="xbody"><dl class="meta" style="margin:0">${ks.map(k=>`<dt>${esc(XLABEL[k])}</dt><dd>${esc(x[k])}</dd>`).join("")}</dl></div></details>`;};
   return sec(XDELIVERY,"Consegna","local_shipping")+sec(XCOMMERCIAL,"Dati commerciali","receipt");
 }
 function titleCase(s){s=String(s||"").toLowerCase().replace(/\s+/g," ").trim();return s.charAt(0).toUpperCase()+s.slice(1);}
@@ -1212,7 +1213,8 @@ function viewSettings(){
     <p>Tutto resta solo su questo telefono: niente server, niente account. Se cambi telefono o cancelli l’app, i dati si perdono: fai un backup ogni tanto e salvalo su File o mandatelo su WhatsApp.</p>
     <p>${Object.keys(S.products).length} referenze · ${Object.keys(S.lots).length} lotti · ${Object.keys(S.docs).length} documenti</p>
     <div class="sh-actions"><button class="btn brand" data-action="backup"><span class="ms">backup</span>Backup</button><label class="btn" style="flex:1;justify-content:center;padding:12px;min-height:48px"><span class="ms">settings_backup_restore</span>Ripristina<input type="file" accept="application/json,.json" hidden id="restoreIn"></label></div>
-    <button class="btn ghost" style="margin-top:6px" data-action="export"><span class="ms">table</span>Esporta inventario (CSV)</button></div>`;
+    <button class="btn ghost" style="margin-top:6px" data-action="export"><span class="ms">table</span>Esporta inventario (CSV)</button></div>
+  <p class="muted" style="text-align:center;font-size:12px;margin-top:10px">Versione 11</p>`;
 }
 function catRow(c){const n=Object.values(S.products).filter(p=>p.category===c.id).length;
   return`<div class="cat-row" data-id="${esc(c.id)}"><input class="inp k" maxlength="2" value="${esc(c.kanji||"")}" aria-label="Simbolo"><input class="inp n" value="${esc(c.name)}" placeholder="Nome categoria" aria-label="Nome"><button class="icon-btn" data-action="del-cat" data-id="${esc(c.id)}" ${n?`disabled title="Contiene ${n} referenze"`:""} aria-label="Elimina"><span class="ms">${n?"lock":"delete"}</span></button></div>`;}
